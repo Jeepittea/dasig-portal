@@ -30,8 +30,14 @@ export const api = {
   },
   events: {
     list: (category) => request(`/events${category && category !== 'All' ? `?category=${category}` : ''}`),
+    get: (id) => request(`/events/${id}`),
     register: (id) => request(`/events/${id}/register`, { method: 'POST' }),
     unregister: (id) => request(`/events/${id}/register`, { method: 'DELETE' }),
+    // Admin
+    adminAll: () => request('/events/admin/all'),
+    create: (body) => request('/events', { method: 'POST', body: JSON.stringify(body) }),
+    update: (id, body) => request(`/events/${id}`, { method: 'PUT', body: JSON.stringify(body) }),
+    delete: (id) => request(`/events/${id}`, { method: 'DELETE' }),
   },
   news: {
     list: () => request('/news'),
