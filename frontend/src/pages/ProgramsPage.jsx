@@ -1080,8 +1080,8 @@ function DigitalTicketModal({ passData, onClose }) {
 
         {/* Ticket Barcode / QR Bottom Stub */}
         <div style={{ padding: '16px 20px 22px', background: 'rgba(0,0,0,0.3)' }}>
-          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14 }}>
-            <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 14, flexWrap: 'wrap' }}>
+            <div style={{ flex: '1 1 200px', minWidth: 0 }}>
               <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)', fontWeight: 800, letterSpacing: '0.6px', textTransform: 'uppercase' }}>Ticket Reference No.</div>
               <div style={{ fontSize: 15, fontWeight: 900, color: '#fff', letterSpacing: '1px', fontFamily: 'monospace', marginTop: 2 }}>{refCode}</div>
               <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginTop: 4, lineHeight: 1.4 }}>
@@ -1123,7 +1123,7 @@ function DigitalTicketModal({ passData, onClose }) {
             </div>
 
             {/* QR Card with Click to Enlarge */}
-            <div style={{ flexShrink: 0, textAlign: 'center' }}>
+            <div style={{ flexShrink: 0, textAlign: 'center', margin: '0 auto' }}>
               <div
                 onClick={() => setEnlargeQr(true)}
                 title="Tap to enlarge QR for quick camera scan"
@@ -2311,7 +2311,7 @@ function EventsTab({ user }) {
 
       {/* Event cards grid with Register buttons */}
       {!loading && filteredEvents.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:18 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(min(100%, 290px),1fr))', gap:18 }}>
           {filteredEvents.map((ev, i) => (
             <EvCard
               key={ev.id}
@@ -2836,7 +2836,7 @@ function TrainingTab({ user }) {
 
       {/* Training cards */}
       {!loading && filtered.length > 0 && (
-        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(300px,1fr))', gap:18 }}>
+        <div style={{ display:'grid', gridTemplateColumns:'repeat(auto-fill,minmax(min(100%, 290px),1fr))', gap:18 }}>
           {filtered.map((t, idx) => (
             <TrCard
               key={t.id}
@@ -2862,7 +2862,19 @@ function TrainingTab({ user }) {
           {filtered.length > 0 && <div style={{ flex:1, height:1, background:'rgba(255,255,255,0.06)' }} />}
         </div>
       )}
-      {!loading && filtered.length === 0 && (
+      {!loading && !user && (
+        <div style={{ textAlign:'center', padding:'60px 0' }}>
+          <div style={{ fontSize:42, marginBottom:14 }}>🔒</div>
+          <div style={{ color:'rgba(255,255,255,0.75)', fontSize:16, fontWeight:800, marginBottom:8 }}>
+            Sign in to see training programs
+          </div>
+          <div style={{ color:'rgba(255,255,255,0.45)', fontSize:13, marginBottom:20 }}>
+            Training programs are listed for signed-in guests and DASIG members.
+          </div>
+          <button onClick={() => navigate('/login')} style={{ background:'linear-gradient(90deg,#f97316,#e11d48)', color:'#fff', border:'none', borderRadius:10, padding:'9px 22px', fontSize:13, fontWeight:700, cursor:'pointer', fontFamily:'inherit' }}>Log in →</button>
+        </div>
+      )}
+      {!loading && user && filtered.length === 0 && (
         <div style={{ textAlign:'center', padding:'60px 0' }}>
           <div style={{ fontSize:42, marginBottom:14 }}>🔍</div>
           <div style={{ color:'rgba(255,255,255,0.55)', fontSize:16, fontWeight:800, marginBottom:8 }}>
@@ -2934,7 +2946,7 @@ function CalendarTab({ user }) {
     if (isRefresh) setRefreshing(true); else setLoading(true);
     Promise.all([
       api.events.list({ limit: 1000 }),
-      api.training.list({ limit: 1000 }),
+      api.training.list({ limit: 1000 }).catch(() => ({ data: [] })), // visitors cannot list trainings (INC-08); still show events
     ]).then(([ev, tr]) => {
       setEvents(Array.isArray(ev) ? ev : (ev?.data || []));
       setTrain(Array.isArray(tr) ? tr : (tr?.data || []));
@@ -3431,7 +3443,7 @@ function CalendarTab({ user }) {
             </span>
           </div>
 
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))', gap: 14 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 300px), 1fr))', gap: 14 }}>
             {calItems.slice(0, 6).map(it => {
               const isEvent = it._type === 'event';
               const catTheme = {

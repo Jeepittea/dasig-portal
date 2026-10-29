@@ -5,11 +5,12 @@ import ParticleBackground from '../components/ParticleBackground';
 import HaribonFace from '../components/HaribonFace';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { solveClientQuery } from '../lib/haribonEngine';
 
 // Renders bot reply text with formatted markdown, headings, bullets, numbered lists, and inline code
-function BotText({ text }) {
+function BotText({ text, isStreaming = false }) {
   const navigate = useNavigate();
-  if (!text) return null;
+  if (!text && !isStreaming) return null;
 
   function renderInline(str) {
     if (!str) return '';
@@ -123,6 +124,19 @@ function BotText({ text }) {
           </div>
         );
       })}
+      {isStreaming && (
+        <span style={{
+          display: 'inline-block',
+          width: 8,
+          height: 16,
+          background: 'linear-gradient(180deg,#f97316,#ea580c)',
+          marginLeft: 4,
+          verticalAlign: 'text-bottom',
+          animation: 'blink 0.75s infinite',
+          borderRadius: 2,
+          boxShadow: '0 0 10px rgba(249,115,22,0.9)',
+        }} />
+      )}
     </div>
   );
 }
@@ -382,6 +396,39 @@ const CHAT_CSS = `
     transform: translateY(-2px);
     box-shadow: 0 8px 24px rgba(0,0,0,0.4), 0 0 16px rgba(249,115,22,0.12);
   }
+
+  @media (max-width: 768px) {
+    .chat-header-bar {
+      flex-direction: column !important;
+      align-items: stretch !important;
+      gap: 12px !important;
+    }
+    .chat-header-actions {
+      margin-left: 0 !important;
+      justify-content: flex-start !important;
+      width: 100% !important;
+    }
+    .chat-main-container {
+      flex-direction: column !important;
+    }
+    .chat-history-sidebar {
+      width: 100% !important;
+      max-height: 250px !important;
+    }
+    .chat-bubble-user {
+      max-width: 92% !important;
+    }
+    .chat-bubble-bot {
+      max-width: 95% !important;
+    }
+    .chat-quick-grid {
+      grid-template-columns: 1fr !important;
+    }
+    .chat-msgs-area {
+      height: 400px !important;
+      padding: 16px 14px !important;
+    }
+  }
 `;
 
 function formatTime(d) {
@@ -570,32 +617,113 @@ export default function ChatbotPage() {
 
   const msgsEnd = useRef(null);
   const inputRef = useRef(null);
+  const streamIntervalRef = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
+    };
+  }, []);
 
   useEffect(() => {
     msgsEnd.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages, thinking]);
 
-  async function send(text) {
+  function streamBotResponse(botTemplate, fullReply) {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+
+    if (!fullReply) {
+      setMessages(prev => [...prev, { ...botTemplate, text: '', isStreaming: false }]);
+      return;
+    }
+
+    // Append initial bot message in streaming state
+    setMessages(prev => [...prev, { ...botTemplate, text: '', isStreaming: true }]);
+
+    let currentLength = 0;
+    const step = Math.max(3, Math.ceil(fullReply.length / 50));
+    streamIntervalRef.current = setInterval(() => {
+      currentLength += step;
+      if (currentLength >= fullReply.length) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+        setMessages(prev => {
+          const next = [...prev];
+          const lastIdx = next.length - 1;
+          if (lastIdx >= 0 && next[lastIdx].from === 'bot') {
+            next[lastIdx] = { ...next[lastIdx], text: fullReply, isStreaming: false };
+          }
+          if (autoVoicemail) {
+            setTimeout(() => speakMessage(lastIdx, fullReply), 200);
+          }
+          return next;
+        });
+      } else {
+        const slice = fullReply.slice(0, currentLength);
+        setMessages(prev => {
+          const next = [...prev];
+          const lastIdx = next.length - 1;
+          if (lastIdx >= 0 && next[lastIdx].from === 'bot') {
+            next[lastIdx] = { ...next[lastIdx], text: slice, isStreaming: true };
+          }
+          return next;
+        });
+      }
+    }, 20);
+  }
+
+  async function send(text, isRegenerate = false) {
     const trimmed = (text || input).trim();
     if (!trimmed || thinking) return;
+
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+      setMessages(prev => {
+        const next = [...prev];
+        const lastIdx = next.length - 1;
+        if (lastIdx >= 0 && next[lastIdx].from === 'bot' && next[lastIdx].isStreaming) {
+          next[lastIdx] = { ...next[lastIdx], isStreaming: false };
+        }
+        return next;
+      });
+    }
+
     setInput('');
+    if (inputRef.current) inputRef.current.style.height = 'auto';
     setSuggestions([]);
     setResumed(false);
-    const userMsg = { from: 'user', text: trimmed, time: new Date() };
-    setMessages(prev => [...prev, userMsg]);
+
+    if (!isRegenerate) {
+      const userMsg = { from: 'user', text: trimmed, time: new Date() };
+      setMessages(prev => [...prev, userMsg]);
+    }
     setThinking(true);
 
+    // Prepare multi-turn history payload
+    const historyPayload = messages
+      .filter(m => m.text)
+      .slice(-8)
+      .map(m => ({
+        role: m.from === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
+
     try {
-      const res = await api.chatbot.send(trimmed);
+      const res = await api.chatbot.send(trimmed, historyPayload);
       const newTotal = totalAsked + 1;
       const newMatched = totalMatched + (res.matched ? 1 : 0);
       setTotalAsked(newTotal);
       setTotalMatched(newMatched);
       setMatchRate(Math.round((newMatched / newTotal) * 100));
       setHasReplied(true);
-      const botMsg = {
+      setThinking(false);
+
+      const botTemplate = {
         from: 'bot',
-        text: res.reply,
         intent: res.intent,
         matched: res.matched,
         followups: res.followups || [],
@@ -603,129 +731,28 @@ export default function ChatbotPage() {
         navigate_to: res.navigate_to || null,
         time: new Date(),
       };
-      setMessages(prev => {
-        const next = [...prev, botMsg];
-        if (autoVoicemail) {
-          setTimeout(() => speakMessage(next.length - 1, res.reply), 200);
-        }
-        return next;
-      });
+
+      streamBotResponse(botTemplate, res.reply);
     } catch (err) {
-      console.warn('[chatbot] Backend offline or waking up, using Client High-IQ Synthesis:', err);
-      const fallback = resolveClientHighIQ(trimmed);
+      console.warn('[chatbot] Backend offline or waking up, using Client High-IQ Engine:', err);
+      const fallback = solveClientQuery(trimmed, historyPayload, user);
       setHasReplied(true);
-      const botMsg = {
+      setThinking(false);
+
+      const botTemplate = {
         from: 'bot',
-        text: fallback.reply,
         intent: fallback.intent,
         matched: true,
         followups: fallback.followups || [],
-        suggestions: [],
+        suggestions: fallback.suggestions || [],
         navigate_to: fallback.navigate_to || null,
         time: new Date(),
       };
-      setMessages(prev => {
-        const next = [...prev, botMsg];
-        if (autoVoicemail) {
-          setTimeout(() => speakMessage(next.length - 1, fallback.reply), 200);
-        }
-        return next;
-      });
+
+      streamBotResponse(botTemplate, fallback.reply);
     } finally {
-      setThinking(false);
       setTimeout(() => inputRef.current?.focus(), 50);
     }
-  }
-
-  function resolveClientHighIQ(query) {
-    const q = query.toLowerCase();
-    
-    // 1. Month queries (e.g. september, october, setyembre)
-    if (q.includes('september') || q.includes('setyembre') || q.includes('sep')) {
-      return {
-        reply: `📅 **Consortium Schedule for September 2026:**\n\n### 🏛️ Active Events & Summits:\n• **Regional AI Research & Innovation Summit 2026**\n  📅 **Date:** September 18, 2026\n  📍 **Venue:** CIT-University Main Auditorium, Cebu City\n  👥 **Capacity:** 18/50 registered\n\n• **Inter-HEI Academic Computing Symposium**\n  📅 **Date:** September 25, 2026\n  📍 **Venue:** UP Visayas Performing Arts Hall\n  👥 **Capacity:** 15/50 registered\n\n### 🎓 Faculty Bootcamps:\n• **Applied Generative AI & LLM Systems for Faculty** (4 Weeks · Advanced)\n• **STEM Research Methodologies & Grants Writing** (2 Weeks · Intermediate)\n\n👉 *You can register directly in the [Programs Module](/programs?tab=events)!*`,
-        intent: 'events_month',
-        navigate_to: '/programs?tab=events',
-        followups: ['How do I register for an event?', 'What training programs are available?', 'Tell me about DOST grants']
-      };
-    }
-
-    if (q.includes('october') || q.includes('oktubre') || q.includes('oct')) {
-      return {
-        reply: `📅 **Consortium Schedule for October 2026:**\n\n### 🏛️ Upcoming Events:\n• **Central Visayas EdTech & STEM Leadership Conference**\n  📅 **Date:** October 12, 2026\n  📍 **Venue:** University of San Agustin Auditorium, Iloilo\n  👥 **Capacity:** 10/60 registered\n\n👉 *Reserve your slot in the [Programs Module](/programs?tab=events)!*`,
-        intent: 'events_month',
-        navigate_to: '/programs?tab=events',
-        followups: ['How do I register for an event?', 'What is DASIG?']
-      };
-    }
-
-    // 2. Events & Summits
-    if (q.includes('event') || q.includes('summit') || q.includes('conference') || q.includes('kalihokan') || q.includes('kaganapan')) {
-      return {
-        reply: `📅 **DASIG Consortium Events & Summits:**\n\nDASIG organizes annual research symposiums and technology conferences across Central Visayas:\n\n• **Regional AI Research & Innovation Summit 2026** (Sept 18 · CIT-U)\n• **Inter-HEI Academic Computing Symposium** (Sept 25 · UP Visayas)\n• **Central Visayas EdTech Leadership Conference** (Oct 12 · USa)\n\n👉 *Explore schedules and reserve slots in the [Programs Module](/programs?tab=events)!*`,
-        intent: 'events',
-        navigate_to: '/programs?tab=events',
-        followups: ['How do I register?', 'What training programs are available?']
-      };
-    }
-
-    // 3. Training & Faculty Development
-    if (q.includes('training') || q.includes('bootcamp') || q.includes('course') || q.includes('upskill') || q.includes('kurso')) {
-      return {
-        reply: `🎓 **Faculty Development & Technical Bootcamps:**\n\nDASIG offers certified upskilling bootcamps alongside DICT-7, DOST-7, and CIT-University:\n\n• **Applied Generative AI & LLM Systems** (4 Weeks · Advanced)\n• **STEM Research Methodologies & Grants Writing** (2 Weeks · Intermediate)\n• **Cybersecurity & Data Privacy Governance** (3 Weeks · Advanced)\n\n👉 *Enroll directly in the [Training Module](/programs?tab=training)!*`,
-        intent: 'training',
-        navigate_to: '/programs?tab=training',
-        followups: ['How do I become a member?', 'What funding is available?']
-      };
-    }
-
-    // 4. Membership & Joining
-    if (q.includes('membership') || q.includes('join') || q.includes('apply') || q.includes('apil') || q.includes('sumali')) {
-      return {
-        reply: `👥 **How to Join the DASIG Consortium:**\n\n1. Sign in to your account.\n2. Navigate to the **Membership** module.\n3. Click **"Apply for Membership"** and specify Tier 1 (Full Autonomous HEI) or Tier 2 (Associate College).\n4. Submit for executive board accreditation and charter onboarding.`,
-        intent: 'membership',
-        navigate_to: '/membership',
-        followups: ['Who are the member institutions?', 'What events are coming up?']
-      };
-    }
-
-    // 5. DOST Research Grants & Funding
-    if (q.includes('grant') || q.includes('funding') || q.includes('dost') || q.includes('pondo') || q.includes('budget')) {
-      return {
-        reply: `💰 **DOST-7 Research Grants & Funding Framework:**\n\nDOST Region VII provides robust financial grant mechanisms for academic researchers:\n\n1. **Grants-In-Aid (GIA):** Direct funding for high-impact R&D projects aligning with regional priorities.\n2. **SETUP Program:** Tech upgrading and enterprise innovation assistance for MSMEs.\n3. **Consortium Collaborative Grants:** Joint inter-HEI research grant proposals.\n\n👉 *Track open calls in the [Funding Module](/funding)!*`,
-        intent: 'funding',
-        navigate_to: '/funding',
-        followups: ['What training programs exist?', 'Who are member institutions?']
-      };
-    }
-
-    // 6. Member Institutions (CIT-U, UPV, USA)
-    if (q.includes('cit') || q.includes('upv') || q.includes('san agustin') || q.includes('member institution')) {
-      return {
-        reply: `🏛️ **DASIG Consortium Member Institutions:**\n\n• **CIT-University** (Cebu City — Central Host Node & Engineering Hub)\n• **UP Visayas** (Marine Science, Fisheries & Coastal Resource Management)\n• **University of San Agustin** (Governance, Ethics & Health Sciences)\n• **DOST Region VII** (Science, Technology & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Trade & Commercialization)\n• **DepEd Region VII** (Basic Education & EdTech)`,
-        intent: 'members',
-        navigate_to: '/members',
-        followups: ['What events are coming up?', 'How to apply for membership?']
-      };
-    }
-
-    // 7. Capstone & IT411 Guidance
-    if (q.includes('capstone') || q.includes('it411') || q.includes('validation') || q.includes('iso 25010') || q.includes('tam')) {
-      return {
-        reply: `🎓 **IT411 Capstone & MVP Validation Framework:**\n\n• **ISO/IEC 25010:** Evaluates Functional Suitability, Usability, Performance, Security, and Reliability.\n• **Technology Acceptance Model (TAM):** Measures Perceived Usefulness (PU) and Perceived Ease of Use (PEOU).\n• **Target Demographic:** 30 stakeholders across Students (Guests), Faculty (Members), IT Experts (SMEs), and Admins.`,
-        intent: 'capstone',
-        navigate_to: null,
-        followups: ['What events are coming up?', 'How does Haribon AI work?']
-      };
-    }
-
-    // 8. General High-IQ fallback
-    return {
-      reply: `🦅 **Haribon AI — DASIG Consortium Assistant:**\n\nI understand your inquiry regarding **"${query}"**.\n\nAs the intelligent assistant for the **DASIG Regional Academic Consortium (Region VII)**, I can assist you with:\n\n• 📅 **Events & Summits:** Schedules, venues, and real-time seat reservation.\n• 🎓 **Faculty Development:** Technical training courses and certificates.\n• 💰 **Research Grants:** DOST-7 GIA, SETUP, and institutional funding.\n• 👥 **Consortium Membership:** Application procedures and partner universities (CIT-U, UPV, USA).\n\n💡 *What specific area would you like to explore?*`,
-      intent: 'general_help',
-      navigate_to: null,
-      followups: ['What events are coming up?', 'What training programs are available?', 'How do I join DASIG?']
-    };
   }
 
   function onKey(e) {
@@ -919,7 +946,9 @@ export default function ChatbotPage() {
     if (thinking || idx <= 0) return;
     for (let i = idx - 1; i >= 0; i--) {
       if (messages[i].from === 'user') {
-        send(messages[i].text);
+        const userPrompt = messages[i].text;
+        setMessages(prev => prev.slice(0, i + 1));
+        send(userPrompt, true);
         break;
       }
     }
@@ -969,7 +998,7 @@ export default function ChatbotPage() {
           <div style={{ maxWidth: 1080, margin: '0 auto' }}>
 
             {/* Status bar */}
-            <div style={{
+            <div className="chat-header-bar" style={{
               display: 'flex', alignItems: 'center', gap: 12, marginBottom: 18,
               background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)',
               borderRadius: 14, padding: '12px 18px', flexWrap: 'wrap',
@@ -1003,7 +1032,7 @@ export default function ChatbotPage() {
                   </div>
                 </div>
               )}
-              <div style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
+              <div className="chat-header-actions" style={{ marginLeft: 'auto', display: 'flex', gap: 8, alignItems: 'center', flexWrap: 'wrap' }}>
                 <button
                   onClick={() => setAutoVoicemail(!autoVoicemail)}
                   style={{
@@ -1099,11 +1128,11 @@ export default function ChatbotPage() {
             )}
 
             {/* ── 2-Column Chat & History Container ── */}
-            <div style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
+            <div className="chat-main-container" style={{ display: 'flex', gap: 16, alignItems: 'stretch' }}>
 
               {/* Left Column: Chat History Sidebar */}
               {showHistory && (
-                <aside style={{
+                <aside className="chat-history-sidebar" style={{
                   width: 260, background: 'rgba(10,16,32,0.85)',
                   backdropFilter: 'blur(12px)',
                   border: '1px solid rgba(255,255,255,0.08)',
@@ -1205,7 +1234,7 @@ export default function ChatbotPage() {
                 boxShadow: '0 20px 60px rgba(0,0,0,0.4)',
               }}>
                 {/* Messages area */}
-                <div ref={msgsContainerRef} onScroll={handleScroll} style={{ height: 460, overflowY: 'auto', padding: ended ? 0 : '24px 24px 16px', display: 'flex', flexDirection: 'column', gap: ended ? 0 : 14, position: 'relative' }}>
+                <div ref={msgsContainerRef} className="chat-msgs-area" onScroll={handleScroll} style={{ height: 460, overflowY: 'auto', padding: ended ? 0 : '24px 24px 16px', display: 'flex', flexDirection: 'column', gap: ended ? 0 : 14, position: 'relative' }}>
                 {/* Jump to bottom button */}
                 {!ended && !atBottom && (
                   <div style={{ position: 'sticky', bottom: 8, zIndex: 5, display: 'flex', justifyContent: 'center', pointerEvents: 'none' }}>
@@ -1281,7 +1310,7 @@ export default function ChatbotPage() {
                     )}
 
                     {/* Message bubble */}
-                    <div style={{
+                    <div className={msg.from === 'bot' ? 'chat-bubble-bot' : 'chat-bubble-user'} style={{
                       maxWidth: '82%', padding: msg.from === 'bot' ? '16px 20px' : '12px 18px',
                       borderRadius: 18, fontSize: 13.5,
                       ...(msg.from === 'bot' ? {
@@ -1296,7 +1325,7 @@ export default function ChatbotPage() {
                       }),
                     }}>
                       {msg.from === 'bot' ? (
-                        <BotText text={msg.text} />
+                        <BotText text={msg.text} isStreaming={msg.isStreaming} />
                       ) : (
                         <span style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</span>
                       )}
@@ -1310,7 +1339,7 @@ export default function ChatbotPage() {
                     )}
 
                     {/* Modern Action Bar: Copy, Voice Read, Feedback, Retry */}
-                    {msg.from === 'bot' && i > 0 && (
+                    {msg.from === 'bot' && i > 0 && !msg.isStreaming && (
                       <div className="msg-actions">
                         <button
                           className={`action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
@@ -1362,7 +1391,7 @@ export default function ChatbotPage() {
                     )}
 
                     {/* Did you mean? suggestions when unmatched */}
-                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && msg.matched === false && msg.suggestions?.length > 0 && (
+                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && !msg.isStreaming && msg.matched === false && msg.suggestions?.length > 0 && (
                       <div style={{ marginTop: 10, padding: '12px 16px', background: 'rgba(249,115,22,0.07)', border: '1px solid rgba(249,115,22,0.22)', borderRadius: 12, maxWidth: '84%' }}>
                         <div style={{ fontSize: 11, fontWeight: 800, color: '#fb923c', marginBottom: 8, textTransform: 'uppercase', letterSpacing: '.5px' }}>
                           💡 Did you mean one of these?
@@ -1383,7 +1412,7 @@ export default function ChatbotPage() {
                     )}
 
                     {/* Follow-up suggestions + In-Chat Direct Navigation Card — only on last bot message */}
-                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && (
+                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && !msg.isStreaming && (
                       <div style={{ marginTop: 10, maxWidth: '84%', display: 'flex', flexDirection: 'column', gap: 10 }}>
                         {msg.navigate_to && (() => {
                           const card = NAV_CARD_INFO[msg.navigate_to] || { icon: '🚀', title: 'Open Portal Page', desc: 'Click to view related module details' };
@@ -1502,7 +1531,7 @@ export default function ChatbotPage() {
                       </button>
                     ))}
                   </div>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px,1fr))', gap: 9 }}>
+                  <div className="chat-quick-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px,1fr))', gap: 9 }}>
                     {(CATEGORIZED_CHIPS[activeCat] || CATEGORIZED_CHIPS.ALL).map(({ label, q }) => (
                       <button key={label} className="chip-btn" onClick={() => send(q)} disabled={thinking}>{label}</button>
                     ))}

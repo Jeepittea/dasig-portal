@@ -1,5 +1,6 @@
 const express = require('express');
 const supabase = require('../lib/supabase');
+const { matchIntent: matchIntentKB, isDomainMessage, contentWords, tokenize } = require('../lib/intentMatcher');
 
 const router = express.Router();
 
@@ -86,14 +87,14 @@ const KB = [
       'unsa ang dasig', 'unsa man ang dasig', 'mahitungod sa dasig', 'unsay dasig', 'unsa ning dasig', 'unsay buhaton sa dasig', 'misyon sa dasig', 'bisyon sa dasig',
       'ano ang dasig', 'tungkol sa dasig', 'ano po ang dasig', 'ano ang ginagawa ng dasig', 'ano ang misyon ng dasig', 'ano ang layunin ng dasig'
     ],
-    reply_en: '🏛️ **About DASIG:**\nDASIG (Dynamic Academic and Scientific Information Group) is a premier Region VII academic consortium in Central Visayas dedicated to collaborative research, governance innovation, inter-HEI knowledge sharing, and technological capability development.',
-    reply_ceb: '🏛️ **Mahitungod sa DASIG:**\nAng DASIG (Dynamic Academic and Scientific Information Group) usa ka konsorsyum sa Rehiyon VII nga naghiusa sa mga unibersidad ug mga ahensya sa gobyerno sa Central Visayas aron magtinabangay sa panukiduki (research), inobasyon sa pamunoan, ug pagpalambo sa teknolohiya.',
-    reply_tgl: '🏛️ **Tungkol sa DASIG:**\nAng DASIG (Dynamic Academic and Scientific Information Group) ay isang konsorsyum sa Rehiyon VII na nag-uugnay sa mga unibersidad at ahensya ng pamahalaan sa Central Visayas para sa collaborative research, inobasyon sa pamamahala, at pagpapalawak ng teknolohiya.',
+    reply_en: '🏛️ **What is DASIG?**\n\n**DASIG** stands for **Digital Alliance for Sustainable Innovation and Growth** — the premier regional academic and government consortium in **Central Visayas (Region VII)**, Philippines.\n\n### 🌐 The Regional Consortium Network:\n• **CIT-University** (Cebu City — Host Node & Computing Hub)\n• **UP Visayas** (Marine, Fisheries & Aquatic Sciences)\n• **University of San Agustin** (Governance, Ethics & Health Sciences)\n• **DOST Region VII** (Research Grants & Scientific Innovation)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Regional Trade & MSME Commercialization)\n• **DepEd Region VII** (Basic Education & Educational Leadership)\n\n**Mission:** Advancing collaborative research, accredited faculty bootcamps, and regional innovation across Central Visayas.',
+    reply_ceb: '🏛️ **Unsa ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** mao ang nangunang rehiyonal nga konsorsyum sa mga unibersidad ug mga ahensya sa gobyerno sa **Central Visayas (Rehiyon VII)**.\n\nNaghiusa kini sa 7 ka institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Visayas** (Marine & Aquatic Sciences)\n• **University of San Agustin** (Governance & Ethics)\n• **DOST-7, DICT-7, DTI-7, ug DepEd-7**\n\n**Katuyoan:** Pagtinabangay sa panukiduki (research), libreng technical bootcamps, ug regional digital transformation.',
+    reply_tgl: '🏛️ **Ano ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** ay ang nangungunang rehiyonal na konsorsyum ng mga unibersidad at ahensya ng pamahalaan sa **Central Visayas (Rehiyon VII)**.\n\nPinag-uugnay nito ang 7 kasaping institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Visayas** (Marine & Aquatic Sciences)\n• **University of San Agustin** (Governance & Ethics)\n• **DOST-7, DICT-7, DTI-7, at DepEd-7**\n\n**Layunin:** Collaborative research, pagsasanay sa mga guro, at pagpapalakas ng inobasyon sa Rehiyon VII.',
   },
   {
     intent: 'member_institutions',
     keywords: [
-      'member institutions', 'consortium members', 'who are members', 'list of members', 'partner institutions', 'all members',
+      'member institutions', 'consortium members', 'who are members', 'list of members', 'partner institutions', 'all members', 'member agencies', 'part of consortium', 'member universities',
       'kinsay mga miyembro', 'mga unibersidad nga miyembro', 'kinsay apil sa dasig', 'listahan sa mga miyembro', 'kinsay mga sakop',
       'sino-sino ang mga miyembro', 'mga kasaping paaralan', 'sino ang kasali sa dasig', 'talaan ng mga miyembro'
     ],
@@ -105,6 +106,7 @@ const KB = [
     intent: 'events',
     keywords: [
       'event', 'events', 'summit', 'conference', 'seminar', 'workshop', 'calendar schedule', 'upcoming events',
+      'symposium', 'webinar', 'forum', 'upcoming activities', 'consortium activities', 'whats happening',
       'unsay mga event', 'unsay kalihokan', 'naay event', 'mga umaabot nga event', 'kanus-a ang summit', 'unsay seminar', 'mga kalihukan',
       'anong mga event', 'anong kaganapan', 'may event ba', 'mga paparating na kaganapan', 'kailan ang summit', 'anong seminar', 'mga pagtitipon'
     ],
@@ -116,6 +118,7 @@ const KB = [
     intent: 'event_register',
     keywords: [
       'register event', 'sign up event', 'join event', 'attend event', 'how to register', 'event registration',
+      'reserve slot', 'register guest', 'guest pass',
       'unsaon pag-apil sa event', 'unsaon pag-rehistro', 'gusto ko moapil sa event', 'unsaon pagsalmot', 'pwede ba moapil',
       'paano magparehistro sa event', 'paano sumali sa event', 'gusto kong sumali sa event', 'paano mag-register', 'puwede ba sumali'
     ],
@@ -126,7 +129,7 @@ const KB = [
   {
     intent: 'training',
     keywords: [
-      'training', 'training programs', 'courses', 'bootcamp', 'upskill', 'capacity building',
+      'training', 'training programs', 'courses', 'bootcamp', 'upskill', 'upskilling', 'pagsasanay', 'kurso', 'pagbansay', 'capacity building', 'enroll training', 'enroll bootcamp', 'enroll course',
       'unsay mga training', 'mga kurso', 'training para sa teachers', 'training para sa faculty', 'naay bootcamp', 'unsaon pag-enroll sa training',
       'anong mga training', 'mga kurso', 'pagsasanay para sa mga guro', 'pagsasanay sa faculty', 'may bootcamp ba', 'paano mag-enroll sa training'
     ],
@@ -137,7 +140,7 @@ const KB = [
   {
     intent: 'funding',
     keywords: [
-      'funding', 'grants', 'scholarships', 'research grants', 'dost funding', 'budget', 'financial support',
+      'funding', 'grants', 'scholarships', 'research grants', 'dost funding', 'budget', 'financial support', 'grant calls', 'money research', 'pondo', 'pundo', 'iskolarsip',
       'naay funding', 'naay grants', 'kwarta para sa research', 'pondo sa research', 'scholarship', 'tabang pinansyal',
       'may funding ba', 'may grants ba', 'pondo para sa research', 'pondo sa pananaliksik', 'scholarship', 'tulong pinansyal'
     ],
@@ -148,13 +151,39 @@ const KB = [
   {
     intent: 'membership',
     keywords: [
-      'membership', 'become member', 'apply member', 'join dasig', 'membership application', 'how to join',
+      'membership', 'become member', 'apply member', 'join dasig', 'membership application', 'how to join', 'join consortium',
+      'membership requirements', 'tier 1', 'tier 2', 'full member', 'associate member', 'apply membership',
+      'pag-apply miyembro', 'mag-apply membership',
       'unsaon pag-apil sa dasig', 'unsaon pagkahimong miyembro', 'gusto ko mahimong member', 'pagsali sa dasig', 'pila bayad sa membership',
       'paano sumali sa dasig', 'paano maging miyembro', 'gusto kong maging member', 'pagsali sa dasig', 'magkano ang membership'
     ],
     reply_en: '👥 **How to Join the DASIG Consortium:**\n1. Sign in to your account.\n2. Go to the **Membership** module and click **"Apply for Membership"**.\n3. Fill in your institutional affiliation, select Tier 1 (Full) or Tier 2 (Associate), and submit for admin approval.',
     reply_ceb: '👥 **Unsaon Pag-apil sa DASIG:**\n1. Pag-log in sa imong account.\n2. Adto sa **Membership** module ug i-click ang **"Apply for Membership"**.\n3. Isulod ang detalye sa imong unibersidad o ahensya, pilia ang Tier 1 o Tier 2, ug i-submit para sa pag-apruba sa admin.',
     reply_tgl: '👥 **Paano Sumali sa DASIG:**\n1. Mag-log in sa iyong account.\n2. Pumunta sa **Membership** module at i-click ang **"Apply for Membership"**.\n3. Punan ang mga detalye ng iyong institusyon, piliin ang Tier 1 o Tier 2, at i-submit para sa pag-apruba ng admin.',
+  },
+  {
+    intent: 'policy',
+    keywords: [
+      'policy', 'policies', 'data privacy', 'privacy policy', 'personal data', 'data protection', 'code of conduct',
+      'governance', 'charter', 'guidelines', 'rules', 'bylaws', 'regulations',
+      'polisiya', 'mga polisiya', 'palisiya', 'mga lagda', 'balaod sa dasig',
+      'patakaran', 'mga patakaran', 'alituntunin', 'regulasyon', 'privacy'
+    ],
+    reply_en: '📋 **DASIG Policies:**\nConsortium policies — such as the charter, membership rules and the data privacy policy — are in the **Policies** module. Public policies can be read by anyone; documents marked *Members only* need a member account.\n\n🔒 Personal data in the portal is handled in line with the **Data Privacy Act of 2012 (RA 10173)**.',
+    reply_ceb: '📋 **Mga Polisiya sa DASIG:**\nAng mga polisiya sa konsorsyum — sama sa charter, mga lagda sa membership ug ang data privacy policy — makita sa **Policies** module. Ang mga publiko nga polisiya mabasa sa tanan; ang mga dokumento nga *Members only* nagkinahanglan og member account.\n\n🔒 Ang personal nga datos sa portal gidumala subay sa **Data Privacy Act of 2012 (RA 10173)**.',
+    reply_tgl: '📋 **Mga Patakaran ng DASIG:**\nAng mga patakaran ng konsorsyum — gaya ng charter, mga tuntunin sa membership at ang data privacy policy — ay nasa **Policies** module. Mababasa ng lahat ang mga pampublikong patakaran; ang mga dokumentong *Members only* ay nangangailangan ng member account.\n\n🔒 Ang personal na datos sa portal ay pinangangasiwaan alinsunod sa **Data Privacy Act of 2012 (RA 10173)**.',
+  },
+  {
+    intent: 'partnerships',
+    keywords: [
+      'partner', 'partners', 'partnership', 'partnerships', 'partnership agreements', 'agreements', 'moa', 'mou',
+      'memorandum of agreement', 'collaboration', 'linkages', 'strategic partnerships',
+      'partner sa dasig', 'mga partner', 'kauban sa dasig', 'kasabutan',
+      'katuwang', 'mga katuwang', 'kasosyo', 'kasunduan', 'pakikipagtulungan'
+    ],
+    reply_en: '🤝 **Strategic Partnerships:**\nDASIG works with government agencies, universities and industry through formal agreements (MOAs and MOUs). The full list of partners and agreements is in the **Strategic Partnerships** module, which is available to signed-in **members**.',
+    reply_ceb: '🤝 **Strategic Partnerships:**\nAng DASIG nakigtambayayong sa mga ahensya sa gobyerno, unibersidad ug industriya pinaagi sa pormal nga kasabutan (MOA ug MOU). Ang kompleto nga listahan sa mga partner anaa sa **Strategic Partnerships** module, para sa mga naka-sign in nga **miyembro**.',
+    reply_tgl: '🤝 **Strategic Partnerships:**\nNakikipagtulungan ang DASIG sa mga ahensya ng pamahalaan, unibersidad at industriya sa pamamagitan ng pormal na kasunduan (MOA at MOU). Ang buong listahan ng mga katuwang ay nasa **Strategic Partnerships** module, para sa mga naka-sign in na **miyembro**.',
   },
   {
     intent: 'haribon',
@@ -179,9 +208,43 @@ const KB = [
   }
 ];
 
-// Deep High-IQ Semantic Knowledge Synthesis Engine (Handles App & Non-App General Inquiries)
-function generateHighIQResponse(normalizedQuery, lang) {
+// Deep High-IQ Semantic Knowledge Synthesis Engine (Handles App & Non-App General Inquiries + Multi-Turn History)
+function generateHighIQResponse(normalizedQuery, lang, history = [], ragContext = '') {
   const q = normalizedQuery.toLowerCase().trim();
+
+  // ── MULTI-TURN CONVERSATIONAL MEMORY & FOLLOW-UP RESOLUTION ──────────────
+  if (Array.isArray(history) && history.length > 0) {
+    const prevTurn = [...history].reverse().find(m => (m.role === 'assistant' || m.role === 'bot' || m.from === 'bot') && (m.content || m.text));
+    const prevText = (prevTurn?.content || prevTurn?.text || '').toLowerCase();
+    
+    // Check if query is a contextual follow-up (e.g. "tell me more", "how to register", "where is it", "asa dapit", "paano sumali")
+    const isFollowup = /^(?:tell me more|more details|elaborate|how (?:to|do i) (?:join|register|apply)|where is (?:it|that)|when is (?:it|that)|what time|how much|is it free|what about (?:that|this)|unsaon|asa dapit|kanus-a|libre ba|magkano|paano)\b/i.test(q)
+      || (q.length < 40 && /\b(that|this|it|first|second|third|one|event|program|course|grant)\b/i.test(q));
+
+    if (isFollowup && prevText) {
+      if (prevText.includes('event') || prevText.includes('summit') || prevText.includes('kalihokan')) {
+        if (lang === 'bisaya') {
+          return `🎟️ **Rehistrasyon sa Event (Follow-up):**\n\nBahin sa nahisgotan nga **Consortium Event**, mahimo kang magparehistro direkta pinaagi sa **[Programs Module](/programs?tab=events)**.\n\n• **Lugar & Oras:** Makapili ka og online Zoom hall o venue seat.\n• **QR Pass:** Makadawat ka dayon og opisyal nga digital pass nga may high-contrast QR code ug email confirmation.\n• **VIP Perks:** Kon miyembro ka, libre ang participation certificate!`;
+        } else if (lang === 'tagalog') {
+          return `🎟️ **Rehistrasyon sa Event (Follow-up):**\n\nTungkol sa nabanggit na **Consortium Event**, maaari kang magparehistro diretso sa **[Programs Module](/programs?tab=events)**.\n\n• **Lokasyon at Oras:** May pagpipiliang online stream o on-site venue slot.\n• **QR Pass:** Makatatanggap ka agad ng digital pass na may check-in QR code at email receipt.\n• **VIP Perks:** Libre ang verified certificate para sa mga opisyal na miyembro!`;
+        } else {
+          return `🎟️ **Event Registration Details (Follow-up):**\n\nRegarding the **Consortium Event** discussed:\n\n• **Registration:** You can confirm your seat directly in the **[Programs Module](/programs?tab=events)**.\n• **Instant QR Pass:** An official boarding pass with a high-contrast check-in barcode will be generated and emailed to you.\n• **VIP Privileges:** Consortium members receive priority reservation and a complimentary verified Certificate of Participation!`;
+        }
+      }
+      if (prevText.includes('training') || prevText.includes('bootcamp') || prevText.includes('pagsasanay')) {
+        if (lang === 'bisaya') {
+          return `🎓 **Detalye sa Training Cohort (Follow-up):**\n\nBahin sa atong technical bootcamp:\n\n• **Enrollment:** Abli sa tanang faculty ug IT professionals sa Rehiyon VII pinaagi sa **[Training Module](/programs?tab=training)**.\n• **Modules:** Adunay live hands-on laboratory exercises, capstone mentoring, ug verified digital badge.\n• **Sertipiko:** Ihatag human makompleto ang tanang attendance check-ins.`;
+        } else if (lang === 'tagalog') {
+          return `🎓 **Detalye ng Training Cohort (Follow-up):**\n\nTungkol sa technical training bootcamp:\n\n• **Enrollment:** Bukas para sa lahat ng guro at IT professionals sa Rehiyon VII sa **[Training Module](/programs?tab=training)**.\n• **Nilalaman:** May hands-on laboratory exercises, capstone mentoring, at digital badge.\n• **Sertipiko:** Ibibigay pagkatapos makumpleto ang required session hours.`;
+        } else {
+          return `🎓 **Training Cohort Guidance (Follow-up):**\n\nRegarding the technical professional training program:\n\n• **Enrollment:** Open to regional faculty and tech practitioners via the **[Training Module](/programs?tab=training)**.\n• **Structure:** Includes hands-on lab sessions, project mentoring, and electronic attendance tracking.\n• **Credential:** A verified micro-credential and digital completion badge are awarded upon cohort completion.`;
+        }
+      }
+      if (prevText.includes('member') || prevText.includes('miyembro') || prevText.includes('membership')) {
+        return `🏛️ **Membership Application Steps:**\n\n1. Visit the **[Membership Portal](/membership)**.\n2. Review Tier 1 (Research Hubs) vs. Tier 2 (Affiliate HEIs).\n3. Submit your institutional endorsement form.\n4. Admin approval takes 1–2 business days, unlocking automatic VIP event passes for all affiliated faculty.`;
+      }
+    }
+  }
 
   // ── MATH EVALUATION ────────────────────────────────────────────────────────
   const mathMatch = q.match(/^(\d+(\.\d+)?)\s*([\+\-\*\/xX\^%])\s*(\d+(\.\d+)?)$/) || q.match(/^(?:calculate|solve|what is|compute|pila ang|ano ang)?\s*(\d+(\.\d+)?)\s*([\+\-\*\/xX\^%])\s*(\d+(\.\d+)?)\??$/i);
@@ -350,19 +413,86 @@ function generateHighIQResponse(normalizedQuery, lang) {
   }
 }
 
-// External Generative LLM Caller (Scoped Strictly to DASIG Portal & Region VII with High IQ)
-async function callGenerativeLLM(userPrompt, lang) {
+// Dynamic Live RAG Context Builder (Injects real database facts into LLM & High-IQ synthesizers)
+async function getLiveRAGContext() {
+  try {
+    const [eventsRes, trainRes, fundRes, membersRes] = await Promise.all([
+      supabase.from('events').select('title, date, venue, category, enrolled, total').order('id', { ascending: true }).limit(6),
+      supabase.from('trainings').select('title, schedule, org, duration, level').order('id', { ascending: true }).limit(6),
+      supabase.from('funding_opportunities').select('title, funding_agency, amount, status, deadline').limit(6),
+      supabase.from('members').select('name, acronym, campus, type').limit(8),
+    ]);
+
+    const lines = ['--- LIVE DASIG CONSORTIUM PORTAL DATABASE (VERIFIED REAL-TIME FACTS) ---'];
+
+    if (eventsRes.data && eventsRes.data.length > 0) {
+      lines.push('UPCOMING CONSORTIUM EVENTS:');
+      eventsRes.data.forEach(e => {
+        lines.push(`• "${e.title}" | Date: ${e.date || 'TBA'} | Venue: ${e.venue || 'Virtual Hall'} | Seats: ${e.enrolled || 0}/${e.total || 50}`);
+      });
+    }
+
+    if (trainRes.data && trainRes.data.length > 0) {
+      lines.push('\nTRAINING & BOOTCAMPS:');
+      trainRes.data.forEach(t => {
+        lines.push(`• "${t.title}" | Host: ${t.org || 'DASIG'} | Schedule: ${t.schedule || 'Modular'} | Level: ${t.level || 'Professional'}`);
+      });
+    }
+
+    if (fundRes.data && fundRes.data.length > 0) {
+      lines.push('\nRESEARCH & GRANTS:');
+      fundRes.data.forEach(f => {
+        lines.push(`• "${f.title}" | Agency: ${f.funding_agency || 'DOST-7'} | Status: ${f.status || 'Open'} | Deadline: ${f.deadline || 'Ongoing'}`);
+      });
+    }
+
+    if (membersRes.data && membersRes.data.length > 0) {
+      lines.push('\nMEMBER INSTITUTIONS:');
+      membersRes.data.forEach(m => {
+        lines.push(`• ${m.name} (${m.acronym || ''}) - ${m.campus || 'Region VII'}`);
+      });
+    }
+
+    return lines.join('\n');
+  } catch (err) {
+    console.warn('[chatbot] getLiveRAGContext error:', err.message);
+    return '';
+  }
+}
+
+// External Generative LLM Caller (Scoped Strictly to DASIG Portal & Region VII with High IQ + Multi-Turn Memory)
+async function callGenerativeLLM(userPrompt, lang, history = [], ragContext = '') {
   const systemInstruction = `You are Haribon AI, the specialized, high-IQ intelligent assistant exclusively for the DASIG Regional Academic Consortium (Region VII Central Visayas, Philippines).
 Your scope is strictly focused on the DASIG Portal, its member institutions (CIT-University as Central Host, UP Visayas, University of San Agustin, DOST-7, DICT-7, DTI-7, DepEd-7), consortium events, summits, faculty training bootcamps, DOST research grants, memberships, policies, and academic capstone evaluation.
 You have a VERY HIGH IQ and understand natural phrasing, typos, and questions in English, Bisaya/Cebuano, and Tagalog/Filipino.
-If a user asks about anything outside the DASIG portal, politely, articulately, and constructively re-orient them back to DASIG portal services in ${lang}. Never provide harmful content. Always format output with clear Markdown headers and bullet points.`;
+You remember past conversation context and handle follow-up pronouns naturally.
+Always format output with clear Markdown headers, bold highlights, bullet points, and portal links (e.g. [Programs](/programs?tab=events), [Membership](/membership)).
+
+${ragContext ? ragContext : ''}`;
 
   if (process.env.GEMINI_API_KEY) {
     try {
+      const contents = [];
+      if (Array.isArray(history) && history.length > 0) {
+        history.slice(-8).forEach(h => {
+          const text = (h.content || h.text || '').trim();
+          if (text) {
+            contents.push({
+              role: h.role === 'assistant' || h.role === 'bot' || h.from === 'bot' ? 'model' : 'user',
+              parts: [{ text }]
+            });
+          }
+        });
+      }
+      contents.push({ role: 'user', parts: [{ text: userPrompt }] });
+
       const payload = {
-        contents: [
-          { role: 'user', parts: [{ text: `${systemInstruction}\n\nUser Question: ${userPrompt}` }] }
-        ]
+        systemInstruction: { parts: [{ text: systemInstruction }] },
+        contents,
+        generationConfig: {
+          temperature: 0.7,
+          maxOutputTokens: 1000,
+        }
       };
 
       const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${process.env.GEMINI_API_KEY}`, {
@@ -383,6 +513,20 @@ If a user asks about anything outside the DASIG portal, politely, articulately, 
 
   if (process.env.OPENAI_API_KEY) {
     try {
+      const messages = [{ role: 'system', content: systemInstruction }];
+      if (Array.isArray(history) && history.length > 0) {
+        history.slice(-8).forEach(h => {
+          const text = (h.content || h.text || '').trim();
+          if (text) {
+            messages.push({
+              role: h.role === 'assistant' || h.role === 'bot' || h.from === 'bot' ? 'assistant' : 'user',
+              content: text
+            });
+          }
+        });
+      }
+      messages.push({ role: 'user', content: userPrompt });
+
       const response = await fetch('https://api.openai.com/v1/chat/completions', {
         method: 'POST',
         headers: {
@@ -391,11 +535,8 @@ If a user asks about anything outside the DASIG portal, politely, articulately, 
         },
         body: JSON.stringify({
           model: 'gpt-4o-mini',
-          messages: [
-            { role: 'system', content: systemInstruction },
-            { role: 'user', content: userPrompt }
-          ],
-          temperature: 0.5
+          messages,
+          temperature: 0.6
         })
       });
 
@@ -412,10 +553,99 @@ If a user asks about anything outside the DASIG portal, politely, articulately, 
   return null;
 }
 
+// Levenshtein distance for fuzzy typo tolerance
+function levenshtein(a, b) {
+  const m = a.length, n = b.length;
+  const dp = Array.from({ length: m + 1 }, (_, i) =>
+    Array(n + 1).fill(0).map((_, j) => (i === 0 ? j : j === 0 ? i : 0))
+  );
+  for (let i = 1; i <= m; i++) {
+    for (let j = 1; j <= n; j++) {
+      dp[i][j] = a[i - 1] === b[j - 1] ? dp[i - 1][j - 1]
+        : 1 + Math.min(dp[i - 1][j], dp[i][j - 1], dp[i - 1][j - 1]);
+    }
+  }
+  return dp[m][n];
+}
+
+// Intent matching lives in ../lib/intentMatcher.js (INC-11)
+const matchIntent = (text) => matchIntentKB(KB, text);
+
 // POST /api/chatbot/message
-router.post('/message', async (req, res) => {
-  const { message } = req.body;
-  if (!message || !message.trim()) return res.status(400).json({ error: 'Message is required' });
+// ── Helpers restored (INC-01) ────────────────────────────────────────────────
+// detectMonthQuery() and MULTI_FOLLOWUPS were removed in commit 8e6e0e7 while
+// the /message handler still calls them, so every chatbot message threw a
+// ReferenceError and stopped the API. Restored from the version before 8e6e0e7.
+
+// Month detection map (English, Bisaya and Tagalog month names)
+const MONTH_MAP = {
+  january: 'Jan', jan: 'Jan', enero: 'Jan',
+  february: 'Feb', feb: 'Feb', pebrero: 'Feb',
+  march: 'Mar', mar: 'Mar', marso: 'Mar',
+  april: 'Apr', apr: 'Apr', abril: 'Apr',
+  may: 'May', mayo: 'May',
+  june: 'Jun', jun: 'Jun', hunyo: 'Jun',
+  july: 'Jul', jul: 'Jul', hulyo: 'Jul',
+  august: 'Aug', aug: 'Aug', agosto: 'Aug',
+  september: 'Sep', sep: 'Sep', sept: 'Sep', setyembre: 'Sep',
+  october: 'Oct', oct: 'Oct', oktubre: 'Oct',
+  november: 'Nov', nov: 'Nov', nobyembre: 'Nov',
+  december: 'Dec', dec: 'Dec', disyembre: 'Dec'
+};
+
+function detectMonthQuery(text) {
+  if (!text) return null;
+  const words = text.toLowerCase().split(/[^a-z0-9]+/);
+  for (const w of words) {
+    if (MONTH_MAP[w]) {
+      // "may" is also a Tagalog/English word ("may event ba?", "may I ..."): treat
+      // it as the month only next to a date word or number ("in May", "May 2026").
+      if (w === 'may' && !/\b(in|this|next|last|of|sa|ngayong|karong|during)\s+may\b|\bmay\s+\d{1,4}\b|\b\d{1,2}\s+may\b/i.test(text)) continue;
+      return { token: w, prefix: MONTH_MAP[w], original: w.charAt(0).toUpperCase() + w.slice(1) };
+    }
+  }
+  return null;
+}
+
+// Suggested follow-up questions per language (NFR-USE-06 quick replies)
+const MULTI_FOLLOWUPS = {
+  english: [
+    'What events are coming up?',
+    'How do I become a DASIG member?',
+    'What training programs are available?',
+    'Tell me about research grants & funding',
+    'Who are the member institutions in Region VII?'
+  ],
+  bisaya: [
+    'Unsay mga umaabot nga events?',
+    'Unsaon pag-apil sa DASIG?',
+    'Unsay mga training programs?',
+    'Unsay mga research grants ug funding?',
+    'Kinsay mga miyembro nga unibersidad sa Region VII?'
+  ],
+  tagalog: [
+    'Anong mga events ang paparating?',
+    'Paano sumali sa DASIG?',
+    'Anong training programs ang meron?',
+    'Anong research grants at funding ang bukas?',
+    'Sino-sino ang mga kasaping unibersidad sa Region VII?'
+  ]
+};
+
+// Express 4 does not catch errors thrown inside async handlers; an unhandled
+// rejection then terminates the Node process. Route every async handler through
+// this wrapper so a failure returns HTTP 500 and the API keeps serving others.
+const asyncRoute = (fn) => (req, res, next) => {
+  Promise.resolve(fn(req, res, next)).catch((err) => {
+    console.error('[chatbot] handler error:', err && err.stack ? err.stack : err);
+    if (res.headersSent) return next(err);
+    res.status(500).json({ error: 'The assistant could not answer right now. Please try again.' });
+  });
+};
+
+router.post('/message', asyncRoute(async (req, res) => {
+  const { message, history = [] } = req.body || {};
+  if (typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Message is required' });
 
   const trimmed = message.trim();
   const normalized = trimmed.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/gu, '');
@@ -423,10 +653,10 @@ router.post('/message', async (req, res) => {
   // 1. Detect User's Language
   const lang = detectLanguage(normalized);
 
+
   // 2. Check if this is a Live Database Counts/Stats Query (e.g. "how many events", "how many members", "pila ka miyembro", "ilang events")
   if (
-    normalized.includes('how many') || normalized.includes('pila ka') || normalized.includes('ilang') ||
-    normalized.includes('total count') || normalized.includes('number of') || normalized.includes('pila tanan')
+    /\b(how many|pila ka|ilang|total count|number of|pila tanan)\b/i.test(normalized)
   ) {
     try {
       const [usersCount, eventsRes, trainRes] = await Promise.all([
@@ -576,37 +806,17 @@ router.post('/message', async (req, res) => {
   let match = matchedResult ? matchedResult.entry : null;
   let bestScore = matchedResult ? matchedResult.score : 0;
 
-  // 4. Typo-Tolerant Fuzzy Matching Fallback
-  if (!match || bestScore < 1.5) {
-    const inputWords = normalized.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
-    let fuzzyBest = null;
-    let fuzzyBestScore = 0;
-
-    for (const entry of KB) {
-      let fScore = 0;
-      for (const kw of entry.keywords) {
-        const kwWords = kw.toLowerCase().split(/\s+/);
-        for (const iw of inputWords) {
-          for (const kw2 of kwWords) {
-            if (kw2.length >= 3 && levenshtein(iw, kw2) <= 1) fScore += 1.5;
-          }
-        }
-      }
-      if (fScore > fuzzyBestScore) {
-        fuzzyBestScore = fScore;
-        fuzzyBest = entry;
-      }
-    }
-    if (fuzzyBest && fuzzyBestScore >= 1.5) {
-      match = fuzzyBest;
-      bestScore = fuzzyBestScore;
-    }
-  }
+  // 4. Typo tolerance is part of matchIntent (one edit on words of 5+ letters).
 
   // 5. Cross-Table Semantic Database Search
   if (!match) {
     try {
-      const searchTerms = normalized.toLowerCase().split(/\s+/).filter(w => w.length >= 3);
+      // A place name alone does not make a question about DASIG ("weather in Cebu"),
+      // so locations are not used as search terms.
+      const PLACES = new Set(['cebu', 'iloilo', 'bohol', 'negros', 'siquijor', 'visayas', 'philippines', 'pilipinas',
+        'manila', 'davao', 'mandaue', 'lapu', 'talisay', 'tagbilaran', 'dumaguete', 'miagao', 'region', 'rehiyon']);
+      const searchTerms = contentWords(tokenize(normalized)).filter(w => w.length >= 4 && !PLACES.has(w));
+      const hasTerm = (txt) => !!txt && searchTerms.some(st => new RegExp(`\\b${st.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}`, 'i').test(txt));
       if (searchTerms.length > 0) {
         const [evs, trs, nws, fnd] = await Promise.all([
           supabase.from('events').select('title, date, venue').limit(10),
@@ -617,17 +827,17 @@ router.post('/message', async (req, res) => {
 
         const hits = [];
         (evs.data || []).forEach(e => {
-          if (searchTerms.some(st => e.title.toLowerCase().includes(st) || (e.venue && e.venue.toLowerCase().includes(st)))) {
+          if (hasTerm(e.title)) {
             hits.push(`📅 **Event:** ${e.title} (${e.date || 'TBA'})`);
           }
         });
         (trs.data || []).forEach(t => {
-          if (searchTerms.some(st => t.title.toLowerCase().includes(st) || (t.org && t.org.toLowerCase().includes(st)))) {
+          if (hasTerm(t.title)) {
             hits.push(`🎓 **Training:** ${t.title} by ${t.org}`);
           }
         });
         (nws.data || []).forEach(n => {
-          if (searchTerms.some(st => n.title.toLowerCase().includes(st))) {
+          if (hasTerm(n.title)) {
             hits.push(`📰 **News:** ${n.title}`);
           }
         });
@@ -659,15 +869,35 @@ router.post('/message', async (req, res) => {
     }
   }
 
-  // 6. External Generative LLM (if API keys set)
-  let generatedReply = null;
+  // 6. No intent matched (INC-11, BR-CB-04): Haribon answers only DASIG topics.
+  //    Messages that mention the portal or consortium get the help menu; anything
+  //    else gets the out-of-scope notice instead of a general-knowledge answer.
   if (!match) {
-    generatedReply = await callGenerativeLLM(normalized, lang);
-  }
+    const inDomain = isDomainMessage(normalized);
+    const help = KB.find(k => k.intent === 'general_help');
+    const OUT_OF_SCOPE = {
+      english: "🦅 I can only help with **DASIG Portal and consortium** topics — events, trainings, membership, funding, policies and partnerships. That question is outside what I can answer here.\n\nTry asking, for example, *\"What events are coming up?\"*",
+      bisaya: "🦅 Makatabang lang ko sa mga pangutana bahin sa **DASIG Portal ug sa konsorsyum** — events, training, membership, pondo, polisiya ug partnerships. Kana nga pangutana gawas sa akong matubag dinhi.\n\nSulayi pangutana, pananglitan, *\"Unsay mga umaabot nga events?\"*",
+      tagalog: "🦅 Makatutulong lamang ako sa mga paksa tungkol sa **DASIG Portal at sa konsorsyum** — events, training, membership, pondo, patakaran at partnerships. Labas ang tanong na iyan sa maaari kong sagutin dito.\n\nSubukang itanong, halimbawa, *\"Anong mga events ang paparating?\"*",
+    };
+    const intent = inDomain ? 'general_help' : 'out_of_scope';
+    const reply = inDomain
+      ? (lang === 'bisaya' ? help.reply_ceb : lang === 'tagalog' ? help.reply_tgl : help.reply_en)
+      : OUT_OF_SCOPE[lang] || OUT_OF_SCOPE.english;
 
-  // 7. High-IQ Semantic Synthesis Engine Fallback (Guaranteed intelligent answer)
-  if (!match && !generatedReply) {
-    generatedReply = generateHighIQResponse(normalized, lang);
+    Promise.resolve(supabase.from('chatbot_logs').insert({ message: normalized, matched: inDomain, intent }))
+      .catch(err => console.warn('[chatbot] Log error:', err.message));
+
+    return res.json({
+      reply,
+      matched: inDomain,
+      intent,
+      score: 0,
+      language: lang,
+      followups: MULTI_FOLLOWUPS[lang],
+      navigate_to: null,
+      suggestions: []
+    });
   }
 
   // 8. Log interaction telemetry (fire-and-forget)
@@ -675,23 +905,9 @@ router.post('/message', async (req, res) => {
     supabase.from('chatbot_logs').insert({
       message: normalized,
       matched: true,
-      intent: match ? match.intent : 'high_iq_reasoning',
+      intent: match.intent,
     })
   ).catch(err => console.warn('[chatbot] Log error:', err.message));
-
-  // If generated reply produced
-  if (generatedReply) {
-    return res.json({
-      reply: generatedReply,
-      matched: true,
-      intent: 'high_iq_reasoning',
-      score: 1.0,
-      language: lang,
-      followups: MULTI_FOLLOWUPS[lang],
-      navigate_to: null,
-      suggestions: []
-    });
-  }
 
   // 9. Select Knowledge Base Reply
   let reply = match.reply_en;
@@ -733,6 +949,13 @@ router.post('/message', async (req, res) => {
           reply = `${reply}\n\n🎓 **Featured programs:**\n${list}\n\n👉 *Browse all in the Training module!*`;
         }
       }
+    } else if (match.intent === 'policy') {
+      const { data } = await supabase.from('policies').select('title').eq('members_only', false).eq('archived', false).limit(5);
+      if (data && data.length > 0) {
+        const list = uniq(data, 'title').slice(0, 4).map(p => `• **${p.title}**`).join('\n');
+        const head = lang === 'bisaya' ? 'Mga publiko nga polisiya' : lang === 'tagalog' ? 'Mga pampublikong patakaran' : 'Public policies';
+        reply = `${reply}\n\n📄 **${head}:**\n${list}`;
+      }
     } else if (match.intent === 'funding') {
       const { data } = await supabase.from('funding_opportunities').select('title, category, status').eq('status', 'Open').limit(5);
       if (data && data.length > 0) {
@@ -770,10 +993,10 @@ router.post('/message', async (req, res) => {
     followups: MULTI_FOLLOWUPS[lang],
     navigate_to: PAGE_LINKS[match.intent] || null,
   });
-});
+}));
 
 // POST /api/chatbot/tts — Neural Voice Generation (ElevenLabs + Neural Fallback)
-router.post('/tts', async (req, res) => {
+router.post('/tts', asyncRoute(async (req, res) => {
   const { text, voice = 'Adam' } = req.body;
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'Text is required for voice generation' });
@@ -843,7 +1066,7 @@ router.post('/tts', async (req, res) => {
     console.error('[elevenlabs tts] Fetch error:', err.message);
     return res.status(200).json({ fallback: true, text: clean });
   }
-});
+}));
 
 // GET /api/chatbot/intents
 router.get('/intents', (req, res) => {

@@ -3,6 +3,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import HaribonFace from './HaribonFace';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
+import { solveClientQuery } from '../lib/haribonEngine';
 
 /* ── Role-based quick chips (Trilingual: English, Bisaya, Tagalog) ─ */
 const QUICK_BY_ROLE = {
@@ -54,9 +55,9 @@ function getGreeting(user) {
 }
 
 /* ── Bot-text formatter (Rich Markdown, Headings, Code, Bullets) ─ */
-function WBotText({ text, onNavigate }) {
+function WBotText({ text, onNavigate, isStreaming = false }) {
   const navigate = useNavigate();
-  if (!text) return null;
+  if (!text && !isStreaming) return null;
 
   function renderInline(str) {
     if (!str) return '';
@@ -176,6 +177,19 @@ function WBotText({ text, onNavigate }) {
           </div>
         );
       })}
+      {isStreaming && (
+        <span style={{
+          display: 'inline-block',
+          width: 7,
+          height: 14,
+          background: 'linear-gradient(180deg,#f97316,#ea580c)',
+          marginLeft: 3,
+          verticalAlign: 'text-bottom',
+          animation: 'blink 0.75s infinite',
+          borderRadius: 2,
+          boxShadow: '0 0 8px rgba(249,115,22,0.9)',
+        }} />
+      )}
     </div>
   );
 }
@@ -243,6 +257,24 @@ const WIDGET_CSS = `
   .w-action-btn.copied { background: rgba(16,185,129,0.15); border-color: rgba(16,185,129,0.3); color: #34d399; }
   .w-action-btn.speaking { background: rgba(249,115,22,0.2) !important; border-color: rgba(249,115,22,0.4) !important; color: #fb923c !important; }
   .w-voice-dot { display: inline-block; width: 3px; height: 3px; border-radius: 50%; background: #fb923c; animation: blink 0.9s infinite; }
+
+  @media (max-width: 480px) {
+    .w-chat-container {
+      bottom: 74px !important;
+      right: 8px !important;
+      left: 8px !important;
+      width: auto !important;
+      max-width: calc(100vw - 16px) !important;
+      max-height: calc(100vh - 86px) !important;
+      border-radius: 18px !important;
+    }
+    .w-launcher-btn {
+      bottom: 16px !important;
+      right: 14px !important;
+      width: 52px !important;
+      height: 52px !important;
+    }
+  }
 `;
 
 const ROLE_BADGE = {
@@ -274,6 +306,13 @@ export default function Chatbot() {
   const [listening, setListening] = useState(false);
   const recognitionRef          = useRef(null);
   const msgsRef                 = useRef(null);
+  const streamIntervalRef       = useRef(null);
+
+  useEffect(() => {
+    return () => {
+      if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
+    };
+  }, []);
 
   // Reset chat when user changes (login/logout)
   useEffect(() => {
@@ -368,68 +407,109 @@ export default function Chatbot() {
     }
   }
 
+  function streamBotResponse(botTemplate, fullReply) {
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+    }
+
+    if (!fullReply) {
+      setMessages(prev => [...prev, { ...botTemplate, text: '', isStreaming: false }]);
+      return;
+    }
+
+    setMessages(prev => [...prev, { ...botTemplate, text: '', isStreaming: true }]);
+
+    let currentLength = 0;
+    const step = Math.max(3, Math.ceil(fullReply.length / 45));
+    streamIntervalRef.current = setInterval(() => {
+      currentLength += step;
+      if (currentLength >= fullReply.length) {
+        clearInterval(streamIntervalRef.current);
+        streamIntervalRef.current = null;
+        setMessages(prev => {
+          const next = [...prev];
+          const lastIdx = next.length - 1;
+          if (lastIdx >= 0 && next[lastIdx].from === 'bot') {
+            next[lastIdx] = { ...next[lastIdx], text: fullReply, isStreaming: false };
+          }
+          return next;
+        });
+      } else {
+        const slice = fullReply.slice(0, currentLength);
+        setMessages(prev => {
+          const next = [...prev];
+          const lastIdx = next.length - 1;
+          if (lastIdx >= 0 && next[lastIdx].from === 'bot') {
+            next[lastIdx] = { ...next[lastIdx], text: slice, isStreaming: true };
+          }
+          return next;
+        });
+      }
+    }, 20);
+  }
+
   async function send(text) {
     const t = (text || input).trim();
     if (!t || thinking) return;
+
+    if (streamIntervalRef.current) {
+      clearInterval(streamIntervalRef.current);
+      streamIntervalRef.current = null;
+      setMessages(prev => {
+        const next = [...prev];
+        const lastIdx = next.length - 1;
+        if (lastIdx >= 0 && next[lastIdx].from === 'bot' && next[lastIdx].isStreaming) {
+          next[lastIdx] = { ...next[lastIdx], isStreaming: false };
+        }
+        return next;
+      });
+    }
+
     setInput('');
     setMessages(prev => [...prev, { from:'user', text:t }]);
     setThinking(true);
+
+    const historyPayload = messages
+      .filter(m => m.text)
+      .slice(-8)
+      .map(m => ({
+        role: m.from === 'user' ? 'user' : 'assistant',
+        content: m.text,
+      }));
+
     try {
-      const res = await api.chatbot.send(t);
+      const res = await api.chatbot.send(t, historyPayload);
       setHasReplied(true);
-      setMessages(prev => [...prev, {
-        from:'bot',
-        text: res.reply,
+      setThinking(false);
+
+      const botTemplate = {
+        from: 'bot',
         followups: res.followups || [],
         navigate_to: res.navigate_to || null,
         matched: res.matched,
         suggestions: res.suggestions || [],
-      }]);
+      };
+
+      streamBotResponse(botTemplate, res.reply);
     } catch (err) {
-      console.warn('[chatbot-widget] Backend unavailable, using client synthesis:', err);
-      const fallback = resolveClientHighIQ(t);
+      console.warn('[chatbot-widget] Backend unavailable, using client high-IQ engine:', err);
+      const fallback = solveClientQuery(t, historyPayload, user);
       setHasReplied(true);
-      setMessages(prev => [...prev, {
+      setThinking(false);
+
+      const botTemplate = {
         from: 'bot',
-        text: fallback.reply,
         followups: fallback.followups || [],
         navigate_to: fallback.navigate_to || null,
         matched: true,
-        suggestions: [],
-      }]);
-    } finally {
-      setThinking(false);
-    }
-  }
+        suggestions: fallback.suggestions || [],
+      };
 
-  function resolveClientHighIQ(query) {
-    const q = query.toLowerCase();
-    if (q.includes('september') || q.includes('setyembre') || q.includes('sep')) {
-      return {
-        reply: `📅 **Consortium Schedule for September 2026:**\n\n• **Regional AI Research & Innovation Summit 2026** (Sept 18 · CIT-U Auditorium)\n• **Inter-HEI Computing Symposium** (Sept 25 · UP Visayas)\n• **Applied GenAI Systems Bootcamp** (4 Weeks · DICT & DOST)\n\n👉 *View full details in the [Programs Module](/programs?tab=events)!*`,
-        navigate_to: '/programs?tab=events',
-        followups: ['How do I register?', 'What training is available?']
-      };
+      streamBotResponse(botTemplate, fallback.reply);
+    } finally {
+      setTimeout(() => msgsRef.current && (msgsRef.current.scrollTop = msgsRef.current.scrollHeight), 50);
     }
-    if (q.includes('event') || q.includes('summit') || q.includes('kalihokan')) {
-      return {
-        reply: `📅 **Consortium Events:**\n• **Regional AI Research & Innovation Summit 2026** (Sept 18)\n• **Academic Computing Symposium** (Sept 25)\n• **EdTech Leadership Conference** (Oct 12)\n\n👉 *Register in the [Programs Module](/programs?tab=events)!*`,
-        navigate_to: '/programs?tab=events',
-        followups: ['How to register?', 'What is DASIG?']
-      };
-    }
-    if (q.includes('training') || q.includes('bootcamp') || q.includes('course')) {
-      return {
-        reply: `🎓 **Faculty Training Programs:**\n• **Applied GenAI & LLM Systems** (4 Weeks)\n• **STEM Research Methodologies** (2 Weeks)\n• **Cybersecurity & Data Privacy** (3 Weeks)\n\n👉 *Enroll in the [Training Module](/programs?tab=training)!*`,
-        navigate_to: '/programs?tab=training',
-        followups: ['How do I apply for membership?', 'What grants are open?']
-      };
-    }
-    return {
-      reply: `🦅 **Haribon AI:**\n\nI can assist you with:\n• 📅 **Events & Summits:** Schedules & registration.\n• 🎓 **Faculty Development:** Certified bootcamps.\n• 💰 **DOST-7 Research Grants:** GIA & SETUP calls.\n• 👥 **Membership:** Partner HEIs (CIT-U, UPV, USA).\n\n💡 *What would you like to explore?*`,
-      navigate_to: null,
-      followups: ['What events are coming up?', 'What training is available?']
-    };
   }
 
   const initials = user ? (user.name || 'U').split(' ').map(w => w[0]).slice(0,2).join('').toUpperCase() : null;
@@ -443,7 +523,7 @@ export default function Chatbot() {
 
       {/* ── Chat window ── */}
       {open && (
-        <div style={{
+        <div className="w-chat-container" style={{
           position:'fixed', bottom:88, right:20, width:380,
           borderRadius:22, overflow:'hidden',
           background:'linear-gradient(180deg,#0b1120,#040a1a)',
@@ -455,66 +535,82 @@ export default function Chatbot() {
 
           {/* ── Header ── */}
           <div style={{
-            background:'linear-gradient(135deg,#001233,#0f2d6b 55%,#1e40af)',
-            padding:'13px 15px', display:'flex', alignItems:'center', gap:10,
-            position:'relative', overflow:'hidden', flexShrink:0,
+            background: 'linear-gradient(135deg,#001233,#0f2d6b 55%,#1e40af)',
+            padding: '11px 14px', display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            position: 'relative', overflow: 'hidden', flexShrink: 0,
+            borderBottom: '1px solid rgba(255,255,255,0.08)',
           }}>
             <div style={{ position:'absolute', right:-14, top:-14, width:80, height:80, borderRadius:'50%', background:'radial-gradient(rgba(249,115,22,0.25),transparent)', pointerEvents:'none' }} />
-            <div style={{ position:'absolute', left:'30%', bottom:-20, width:60, height:60, borderRadius:'50%', background:'radial-gradient(rgba(99,102,241,0.2),transparent)', pointerEvents:'none' }} />
 
-            {/* Haribon avatar */}
-            <div style={{ width:38, height:38, borderRadius:11, overflow:'hidden', flexShrink:0, border:'2px solid rgba(255,255,255,0.2)', boxShadow:'0 2px 10px rgba(0,0,0,0.4)' }}>
-              <HaribonFace size={38} />
-            </div>
-
-            <div style={{ flex:1, minWidth:0 }}>
-              <div style={{ display:'flex', alignItems:'center', gap:7 }}>
-                <span style={{ color:'#fff', fontWeight:900, fontSize:13.5 }}>Haribon</span>
-                <span style={{ color:'#38bdf8', fontSize:11, fontWeight:700 }}>Trilingual AI</span>
-                <span style={{ background: 'rgba(249,115,22,0.18)', color: '#fb923c', border: '1px solid rgba(249,115,22,0.3)', borderRadius: 5, padding: '1px 5px', fontSize: 9.5, fontWeight: 800 }}>
-                  🧠 High-IQ
-                </span>
+            {/* Left: Haribon Identity */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, minWidth: 0 }}>
+              <div style={{ width: 36, height: 36, borderRadius: 10, overflow: 'hidden', flexShrink: 0, border: '2px solid rgba(255,255,255,0.25)', boxShadow: '0 2px 10px rgba(0,0,0,0.4)' }}>
+                <HaribonFace size={36} />
               </div>
-              <div style={{ display:'flex', alignItems:'center', gap:7, marginTop:2 }}>
-                <span style={{ width:6, height:6, borderRadius:'50%', background:'#4ade80', display:'inline-block', boxShadow:'0 0 5px rgba(74,222,128,0.8)' }} />
-                <span style={{ color:'rgba(255,255,255,0.7)', fontSize:10.5 }}>English · Bisaya · Tagalog</span>
-              </div>
-            </div>
 
-            {/* User role badge */}
-            {user && (
-              <div style={{ display:'flex', alignItems:'center', gap:6, flexShrink:0 }}>
-                <div style={{ width:26, height:26, borderRadius:7, overflow:'hidden', flexShrink:0 }}>
-                  {user.avatar_url
-                    ? <img src={user.avatar_url} alt="" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
-                    : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#f97316,#e11d48)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:9, fontWeight:900, color:'#fff' }}>{initials}</div>
-                  }
+              <div style={{ minWidth: 0, lineHeight: 1.25 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                  <span style={{ color: '#fff', fontWeight: 900, fontSize: 13.5, letterSpacing: '-0.2px' }}>Haribon AI</span>
+                  <span style={{ width: 6, height: 6, borderRadius: '50%', background: '#4ade80', display: 'inline-block', boxShadow: '0 0 6px #4ade80' }} />
                 </div>
-                <span style={{ background: rb.bg, color: rb.color, border:`1px solid ${rb.color}30`, borderRadius:6, padding:'2px 8px', fontSize:10, fontWeight:800 }}>
-                  {rb.label}
-                </span>
+                <div style={{ color: 'rgba(255,255,255,0.65)', fontSize: 10.5, fontWeight: 600, marginTop: 2, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                  Trilingual AI · Eng / Bis / Tag
+                </div>
               </div>
-            )}
+            </div>
 
-            {/* Action buttons */}
-            <div style={{ display:'flex', gap:5, flexShrink:0 }}>
+            {/* Right: User Status & Actions */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 }}>
+              {user && (
+                <div
+                  title={`Logged in as ${user.name} (${rb.label})`}
+                  style={{
+                    display: 'flex', alignItems: 'center', gap: 5,
+                    background: rb.bg, border: `1px solid ${rb.color}40`,
+                    borderRadius: 20, padding: '2px 8px 2px 3px',
+                  }}
+                >
+                  <div style={{ width: 19, height: 19, borderRadius: '50%', overflow: 'hidden', flexShrink: 0 }}>
+                    {user.avatar_url
+                      ? <img src={user.avatar_url} alt="" style={{ width:'100%', height:'100%', objectFit:'cover', display:'block' }} />
+                      : <div style={{ width:'100%', height:'100%', background:'linear-gradient(135deg,#f97316,#e11d48)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:8.5, fontWeight:900, color:'#fff' }}>{initials}</div>
+                    }
+                  </div>
+                  <span style={{ color: rb.color, fontSize: 9.5, fontWeight: 800 }}>{rb.label}</span>
+                </div>
+              )}
+
               <button onClick={() => {
                 sessionStorage.setItem('haribon_resume', JSON.stringify(messages));
                 setOpen(false);
                 navigate('/chatbot');
               }} style={{
-                background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.2)',
-                borderRadius:7, padding:'5px 11px', fontSize:11, fontWeight:700,
+                background:'rgba(255,255,255,0.12)', border:'1px solid rgba(255,255,255,0.22)',
+                borderRadius:8, padding:'4px 9px', fontSize:11, fontWeight:700,
                 color:'#fff', cursor:'pointer', fontFamily:'inherit',
                 transition:'all .13s',
               }}
               onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.22)'}
               onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
+              title="Expand to Full Chatbot Page"
               >Full ↗</button>
-              {ended
-                ? <button onClick={newChat} style={{ background:'rgba(249,115,22,0.2)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:7, padding:'4px 9px', fontSize:10.5, fontWeight:700, color:'#f97316', cursor:'pointer', fontFamily:'inherit' }}>New</button>
-                : <button onClick={() => setEnded(true)} style={{ background:'rgba(225,29,72,0.15)', border:'1px solid rgba(225,29,72,0.3)', borderRadius:7, padding:'4px 9px', fontSize:10.5, fontWeight:700, color:'#f43f5e', cursor:'pointer', fontFamily:'inherit' }}>End</button>
-              }
+
+              {ended ? (
+                <button onClick={newChat} style={{ background:'rgba(249,115,22,0.2)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:8, padding:'4px 9px', fontSize:10.5, fontWeight:700, color:'#f97316', cursor:'pointer', fontFamily:'inherit' }}>New</button>
+              ) : (
+                <button
+                  onClick={() => setOpen(false)}
+                  style={{
+                    background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
+                    borderRadius: 8, width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
+                    color: 'rgba(255,255,255,0.7)', cursor: 'pointer', fontFamily: 'inherit', fontSize: 13, fontWeight: 700,
+                    transition: 'all .13s',
+                  }}
+                  onMouseEnter={e => { e.currentTarget.style.background='rgba(239,68,68,0.2)'; e.currentTarget.style.color='#f87171'; }}
+                  onMouseLeave={e => { e.currentTarget.style.background='rgba(255,255,255,0.08)'; e.currentTarget.style.color='rgba(255,255,255,0.7)'; }}
+                  title="Minimize Chat"
+                >✕</button>
+              )}
             </div>
           </div>
 
@@ -552,11 +648,11 @@ export default function Chatbot() {
                         : { background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', borderBottomRightRadius:4, boxShadow:'0 3px 12px rgba(249,115,22,0.35)' }
                       ),
                     }}>
-                      {msg.from === 'bot' ? <WBotText text={msg.text} onNavigate={() => setOpen(false)} /> : <span style={{ lineHeight:1.55 }}>{msg.text}</span>}
+                      {msg.from === 'bot' ? <WBotText text={msg.text} onNavigate={() => setOpen(false)} isStreaming={msg.isStreaming} /> : <span style={{ lineHeight:1.55 }}>{msg.text}</span>}
                     </div>
 
                     {/* Rating, Copy & Voice Read actions for bot messages */}
-                    {msg.from === 'bot' && i > 0 && (
+                    {msg.from === 'bot' && i > 0 && !msg.isStreaming && (
                       <div className="w-msg-actions">
                         <button
                           className={`w-action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
@@ -599,7 +695,7 @@ export default function Chatbot() {
                     )}
 
                     {/* Related suggestions when no intent match found */}
-                    {i === messages.length - 1 && msg.from === 'bot' && !ended && msg.matched === false && msg.suggestions?.length > 0 && (
+                    {i === messages.length - 1 && msg.from === 'bot' && !ended && !msg.isStreaming && msg.matched === false && msg.suggestions?.length > 0 && (
                       <div style={{ marginTop: 8, padding: '8px 10px', background: 'rgba(249,115,22,0.07)', border: '1px solid rgba(249,115,22,0.18)', borderRadius: 10, maxWidth: '92%' }}>
                         <div style={{ fontSize: 10, fontWeight: 700, color: 'rgba(249,115,22,0.8)', marginBottom: 5, textTransform: 'uppercase', letterSpacing: '.4px' }}>💡 Did you mean?</div>
                         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 4 }}>
@@ -613,7 +709,7 @@ export default function Chatbot() {
                     )}
 
                     {/* Navigate CTA + follow-up chips — last bot message only */}
-                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && (
+                    {msg.from === 'bot' && i === messages.length - 1 && !thinking && !msg.isStreaming && (
                       <div style={{ marginTop:7, maxWidth:'92%', display:'flex', flexDirection:'column', gap:7 }}>
                         {msg.navigate_to && (
                           <button className="w-nav-btn" onClick={() => { navigate(msg.navigate_to); setOpen(false); }}>
@@ -701,6 +797,7 @@ export default function Chatbot() {
 
       {/* ── Meta AI-style Floating Toggle Button ── */}
       <button
+        className="w-launcher-btn"
         onClick={() => open ? setOpen(false) : openWidget()}
         title="Chat with Haribon AI"
         style={{

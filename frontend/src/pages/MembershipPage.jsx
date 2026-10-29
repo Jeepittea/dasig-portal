@@ -39,7 +39,7 @@ function CertificateModal({ user, status, onClose }) {
       <body>
         <div class="cert">
           <div class="logo">🏛️</div>
-          <div class="org">Dynamic Academic and Scientific Information Group · Region VII</div>
+          <div class="org">Digital Alliance for Sustainable Innovation and Growth · Region VII</div>
           <h1>Certificate of Membership</h1>
           <div class="sub">This is to certify that</div>
           <div class="name">${user.name}</div>
@@ -489,7 +489,7 @@ export default function MembershipPage() {
           </div>
 
           {/* Tier info cards — Modern frosted glass style */}
-          <div style={{ marginTop: 24, display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 12 }}>
+          <div style={{ marginTop: 24, display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 220px), 1fr))', gap: 12 }}>
             {[
               {
                 tier: 'Tier 1', label: 'Full Member', icon: '⭐',

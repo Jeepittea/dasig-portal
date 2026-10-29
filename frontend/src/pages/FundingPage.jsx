@@ -56,11 +56,35 @@ export default function FundingPage() {
   const [selected, setSelected]   = useState(null);
 
   useEffect(() => {
+    if (!isMember) { setLoading(false); return; } // members only (BR-FM-01, INC-08)
     api.funding.list({ category, status })
       .then(r => setItems(Array.isArray(r) ? r : (r?.data || [])))
       .catch(() => {})
       .finally(() => setLoading(false));
-  }, [category, status]);
+  }, [isMember, category, status]);
+
+  if (!isMember) {
+    return (
+      <div style={{ background: 'linear-gradient(180deg,#000d30 0%,#020817 300px,#0f172a 100%)', minHeight: '100vh', position: 'relative' }}>
+        <ParticleBackground density={40} />
+        <div style={{ position: 'relative', zIndex: 1 }}>
+        <PageHeader eyebrow="Funding & Investment" title="Funding Opportunities" />
+        <div style={{ minHeight: '50vh', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', gap: 16 }}>
+          <div style={{ fontSize: 52 }}>💰</div>
+          <div style={{ fontSize: 20, fontWeight: 800, color: '#fff' }}>Members Only</div>
+          <p style={{ color: 'rgba(255,255,255,0.5)', fontSize: 14, textAlign: 'center', maxWidth: 340 }}>
+            Funding opportunities are available to active DASIG consortium members.
+          </p>
+          <button onClick={() => navigate(user ? '/membership' : '/login')} style={{
+            background: 'linear-gradient(90deg,#f97316,#e11d48)', color: '#fff',
+            border: 'none', borderRadius: 12, padding: '13px 32px', fontSize: 14, fontWeight: 700,
+            cursor: 'pointer', fontFamily: 'inherit', boxShadow: '0 6px 20px rgba(249,115,22,0.4)',
+          }}>{user ? 'Apply for Membership →' : 'Log in →'}</button>
+        </div>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div style={{ background: 'linear-gradient(180deg,#000d30 0%,#020817 300px,#0f172a 100%)', minHeight: '100vh', position: 'relative' }}>
@@ -170,7 +194,7 @@ export default function FundingPage() {
         <div style={{ maxWidth: 1120, margin: '0 auto' }}>
 
           {/* Stats */}
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3,1fr)', gap: 14, marginBottom: 28 }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 180px), 1fr))', gap: 14, marginBottom: 28 }}>
             {[
               { label: 'Open Opportunities', value: items.filter(i => i.status === 'Open').length,     color: '#34d399', icon: '💰' },
               { label: 'Upcoming Grants',    value: items.filter(i => i.status === 'Upcoming').length, color: '#60a5fa', icon: '⏳' },
@@ -231,7 +255,7 @@ export default function FundingPage() {
               <div style={{ color:'rgba(255,255,255,0.28)', fontSize:13 }}>Try adjusting the category or status filter above</div>
             </div>
           ) : (
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2,1fr)', gap: 16 }}>
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 320px), 1fr))', gap: 16 }}>
               {items.map((item, i) => <FundingCard key={item.id} item={item} index={i} onClick={() => setSelected(item)} />)}
             </div>
           )}
