@@ -1,0 +1,28 @@
+# Keeps this repository in step with the main project repository (Aire2001/Dasig-Portal),
+# which is the one the live site deploys from. Runs every 6 hours and can be started by hand
+# (Actions -> "Sync from Aire2001/Dasig-Portal" -> Run workflow). Delete this file to stop it.
+name: Sync from Aire2001/Dasig-Portal
+
+on:
+  schedule:
+    - cron: '17 */6 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Merge the latest main from Aire2001/Dasig-Portal
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git remote add upstream https://github.com/Aire2001/Dasig-Portal.git
+          git fetch upstream main
+          git merge --no-edit upstream/main
+          git push origin HEAD:main
