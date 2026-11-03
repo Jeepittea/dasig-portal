@@ -148,7 +148,7 @@ const SLASH_COMMANDS = [
   { cmd: '/events', label: 'View upcoming consortium summits & conferences', q: 'What events are coming up in Region VII?' },
   { cmd: '/training', label: 'View accredited faculty training programs', q: 'What faculty training bootcamps are open for enrollment?' },
   { cmd: '/grants', label: 'Query open DOST-7 research grants & calls', q: 'What funding opportunities and research grants exist?' },
-  { cmd: '/members', label: 'List partner HEIs (CIT-U, UPV, USA)', q: 'Who are the DASIG member institutions?' },
+  { cmd: '/members', label: 'List partner HEIs (CIT-U, UP Cebu, USC)', q: 'Who are the DASIG member institutions?' },
   { cmd: '/policies', label: 'Show Data Privacy & IP sharing accords', q: 'What governance policies and charters are active?' },
   { cmd: '/clear', label: 'Clear current conversation and reset', q: '__CLEAR__' },
 ];
@@ -480,10 +480,20 @@ export default function ChatbotPage() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [showHistory, setShowHistory] = useState(true);
 
-  const initMsg = { from:'bot', text: getLocalizedGreeting(user, 'en'), time: new Date() };
+  const [activeLang, setActiveLang] = useState(() => {
+    try {
+      return localStorage.getItem('dasig_lang') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
 
   // Resume chat from mini widget if available, otherwise fresh start
   const [messages, setMessages] = useState(() => {
+    let initialLang = 'en';
+    try {
+      initialLang = localStorage.getItem('dasig_lang') || 'en';
+    } catch (_) {}
     try {
       const saved = sessionStorage.getItem('haribon_resume');
       if (saved) {
@@ -495,7 +505,7 @@ export default function ChatbotPage() {
         }
       }
     } catch (_) {}
-    return [initMsg];
+    return [{ from:'bot', text: getLocalizedGreeting(user, initialLang), time: new Date() }];
   });
   const [input, setInput]             = useState('');
   const [thinking, setThinking]       = useState(false);
@@ -515,18 +525,11 @@ export default function ChatbotPage() {
     try { return !!sessionStorage.getItem('haribon_resume'); } catch { return false; }
   });
   const [atBottom, setAtBottom]       = useState(true);
-  const [ratings, setRatings]   = useState({});   // {[msgIndex]: 'up'|'down'}
-  const [copied,  setCopied]    = useState(null);  // message index recently copied
-  const [listening, setListening] = useState(false);
+  const [ratings, setRatings]         = useState({});   // {[msgIndex]: 'up'|'down'}
+  const [copied,  setCopied]          = useState(null);  // message index recently copied
+  const [listening, setListening]     = useState(false);
   const [autoVoicemail, setAutoVoicemail] = useState(false);
-  const [activeCat, setActiveCat] = useState('ALL');
-  const [activeLang, setActiveLang] = useState(() => {
-    try {
-      return localStorage.getItem('dasig_lang') || 'en';
-    } catch {
-      return 'en';
-    }
-  });
+  const [activeCat, setActiveCat]     = useState('ALL');
   const [translations, setTranslations] = useState({});
   const [translatingIdx, setTranslatingIdx] = useState(null);
   const [showLangMenu, setShowLangMenu] = useState(false);
@@ -555,35 +558,31 @@ export default function ChatbotPage() {
       return updated;
     });
 
-    setTranslations(prev => {
-      const next = { ...prev };
-      delete next[0];
-      return next;
-    });
+    // 2. Clear translations if returning to English
+    if (newLang === 'en') {
+      setTranslations({});
+      return;
+    }
 
-    // 2. Auto-translate subsequent bot messages into newLang
-    setMessages(currentMsgs => {
-      currentMsgs.forEach(async (m, idx) => {
-        if (idx > 0 && m.from === 'bot' && m.text) {
-          try {
-            setTranslatingIdx(idx);
-            const res = await translateMessageText(m.text, newLang);
-            setTranslations(prev => ({
-              ...prev,
-              [idx]: {
-                translatedText: res,
-                targetLang: newLang,
-                isShowingTranslated: true,
-              }
-            }));
-          } catch (err) {
-            console.warn('Auto translation failed for msg', idx, err);
-          } finally {
-            setTranslatingIdx(null);
-          }
+    // 3. Auto-translate subsequent bot messages into newLang
+    messages.forEach(async (m, idx) => {
+      if (idx > 0 && m.from === 'bot' && m.text) {
+        try {
+          setTranslatingIdx(idx);
+          const res = await translateMessageText(m.text, newLang);
+          setTranslations(prev => ({
+            ...prev,
+            [idx]: {
+              translatedText: res,
+              targetLang: newLang,
+              isShowingTranslated: true,
+            }
+          }));
+        } catch (err) {
+        } finally {
+          setTranslatingIdx(null);
         }
-      });
-      return currentMsgs;
+      }
     });
   };
   const recognitionRef = useRef(null);
@@ -801,7 +800,6 @@ export default function ChatbotPage() {
         try {
           replyText = await translateMessageText(res.reply, activeLang);
         } catch (e) {
-          console.warn('[chatbot-page] Auto-translation to activeLang failed:', e);
         }
       }
 
@@ -817,7 +815,6 @@ export default function ChatbotPage() {
 
       streamBotResponse(botTemplate, replyText);
     } catch (err) {
-      console.warn('[chatbot] Backend offline or waking up, using Client High-IQ Engine:', err);
       const fallback = solveClientQuery(trimmed, historyPayload, user);
       setHasReplied(true);
       setThinking(false);
@@ -827,7 +824,6 @@ export default function ChatbotPage() {
         try {
           replyText = await translateMessageText(fallback.reply, activeLang);
         } catch (e) {
-          console.warn('[chatbot-page] Auto-translation to activeLang fallback failed:', e);
         }
       }
 
@@ -959,7 +955,6 @@ export default function ChatbotPage() {
         },
       }));
     } catch (err) {
-      console.warn('Translation error:', err);
     } finally {
       setTranslatingIdx(null);
     }
@@ -973,7 +968,7 @@ export default function ChatbotPage() {
   const [voiceSpeed, setVoiceSpeed]   = useState(1.0);
 
   function speakMessage(idx, text, langKey = activeLang) {
-    voicePlayer.play(idx, text, langKey, (sIdx) => setSpeakingIdx(sIdx));
+    voicePlayer.play(idx, text, langKey, (sIdx) => setSpeakingIdx(sIdx), voiceSpeed);
   }
 
   async function copyMessage(idx, text) {
@@ -1399,21 +1394,25 @@ export default function ChatbotPage() {
                     )}
 
                     {/* Modern Action Bar: Copy, Voice Read, Feedback, Retry */}
-                    {msg.from === 'bot' && i > 0 && !msg.isStreaming && (
+                    {msg.from === 'bot' && !msg.isStreaming && (
                       <div className="msg-actions">
-                        <button
-                          className={`action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
-                          onClick={() => rateMessage(i, 'up')}
-                        >
-                          👍{ratings[i] === 'up' ? ` ${ui.helpful}` : ''}
-                        </button>
-                        <button
-                          className={`action-btn${ratings[i] === 'down' ? ' rated-down' : ''}`}
-                          onClick={() => rateMessage(i, 'down')}
-                          title="Not helpful"
-                        >
-                          👎{ratings[i] === 'down' ? ` ${ui.notHelpful}` : ''}
-                        </button>
+                        {i > 0 && (
+                          <>
+                            <button
+                              className={`action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
+                              onClick={() => rateMessage(i, 'up')}
+                            >
+                              👍{ratings[i] === 'up' ? ` ${ui.helpful}` : ''}
+                            </button>
+                            <button
+                              className={`action-btn${ratings[i] === 'down' ? ' rated-down' : ''}`}
+                              onClick={() => rateMessage(i, 'down')}
+                              title="Not helpful"
+                            >
+                              👎{ratings[i] === 'down' ? ` ${ui.notHelpful}` : ''}
+                            </button>
+                          </>
+                        )}
                         <button
                           className={`action-btn${copied === i ? ' copied' : ''}`}
                           onClick={() => copyMessage(i, msg.text)}
@@ -1421,14 +1420,16 @@ export default function ChatbotPage() {
                         >
                           {copied === i ? ui.copied : ui.copy}
                         </button>
-                        <button
-                          className={`action-btn${translations[i]?.isShowingTranslated ? ' active-translate' : ''}`}
-                          onClick={() => toggleTranslate(i, msg.text)}
-                          title={translations[i]?.isShowingTranslated ? 'Revert to original text' : `Translate to ${getLangByKey(activeLang).name}`}
-                          style={translations[i]?.isShowingTranslated ? { color: '#f97316', borderColor: 'rgba(249,115,22,0.4)', background: 'rgba(249,115,22,0.12)' } : undefined}
-                        >
-                          {translatingIdx === i ? '⏳ Translating…' : translations[i]?.isShowingTranslated ? ui.original : ui.translate}
-                        </button>
+                        {i > 0 && (
+                          <button
+                            className={`action-btn${translations[i]?.isShowingTranslated ? ' active-translate' : ''}`}
+                            onClick={() => toggleTranslate(i, msg.text)}
+                            title={translations[i]?.isShowingTranslated ? 'Revert to original text' : `Translate to ${getLangByKey(activeLang).name}`}
+                            style={translations[i]?.isShowingTranslated ? { color: '#f97316', borderColor: 'rgba(249,115,22,0.4)', background: 'rgba(249,115,22,0.12)' } : undefined}
+                          >
+                            {translatingIdx === i ? '⏳ Translating…' : translations[i]?.isShowingTranslated ? ui.original : ui.translate}
+                          </button>
+                        )}
                         <button
                           className={`action-btn${speakingIdx === i ? ' speaking-btn' : ''}`}
                           onClick={() => {
@@ -1440,24 +1441,16 @@ export default function ChatbotPage() {
                         >
                           {speakingIdx === i ? (
                             <>
-                              <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center', marginRight: 3 }}>
-                                <span className="voice-dot" style={{ animationDelay: '0s' }} />
-                                <span className="voice-dot" style={{ animationDelay: '0.2s' }} />
-                                <span className="voice-dot" style={{ animationDelay: '0.4s' }} />
+                              <span style={{ display: 'inline-flex', gap: 2, alignItems: 'center' }}>
+                                <span className="voice-wave-dot" style={{ animationDelay: '0s' }} />
+                                <span className="voice-wave-dot" style={{ animationDelay: '0.2s' }} />
+                                <span className="voice-wave-dot" style={{ animationDelay: '0.4s' }} />
                               </span>
-                              <span>{ui.stopVoice}</span>
+                              <span>Stop</span>
                             </>
                           ) : (
-                            <span>{ui.readAloud}</span>
+                            <>🔊 {ui.read}</>
                           )}
-                        </button>
-                        <button
-                          className="action-btn"
-                          onClick={() => regenerateResponse(i)}
-                          title="Regenerate response"
-                          disabled={thinking}
-                        >
-                          🔄 Retry
                         </button>
                       </div>
                     )}

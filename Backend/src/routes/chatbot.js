@@ -4,10 +4,97 @@ const { matchIntent: matchIntentKB, isDomainMessage, contentWords, tokenize } = 
 
 const router = express.Router();
 
+// Translation in-memory cache and Language Code Map
+const translationCache = new Map();
+
+// Audio TTS Language Map (routes regional PH dialects to Philippine phonetic voice 'tl')
+const TTS_LANG_MAP = {
+  en: 'en',
+  bis: 'tl',
+  ceb: 'tl',
+  tgl: 'tl',
+  tag: 'tl',
+  tl: 'tl',
+  fil: 'tl',
+  es: 'es',
+  ja: 'ja',
+  ko: 'ko',
+  zh: 'zh-CN',
+  'zh-cn': 'zh-CN',
+  fr: 'fr',
+  de: 'de',
+  ar: 'ar',
+  ilo: 'tl',
+  hil: 'tl',
+  it: 'it',
+  id: 'id',
+};
+
+const LANG_CODE_MAP = {
+  en: 'en',
+  bis: 'ceb',
+  ceb: 'ceb',
+  tgl: 'tl',
+  tag: 'tl',
+  tl: 'tl',
+  es: 'es',
+  ja: 'ja',
+  ko: 'ko',
+  zh: 'zh-CN',
+  'zh-cn': 'zh-CN',
+  fr: 'fr',
+  de: 'de',
+  ar: 'ar',
+  ilo: 'ilo',
+  hil: 'hil',
+  it: 'it',
+  id: 'id',
+};
+
+async function translateServerText(text, targetLang = 'en', sourceLang = 'auto') {
+  if (!text || typeof text !== 'string') return text;
+  const cleanText = text.trim();
+  const normalizedTarget = LANG_CODE_MAP[targetLang.toLowerCase()] || targetLang || 'en';
+  const normalizedSource = sourceLang === 'auto' ? 'auto' : (LANG_CODE_MAP[sourceLang.toLowerCase()] || sourceLang || 'auto');
+
+  if (normalizedTarget === normalizedSource) return cleanText;
+
+  const cacheKey = `${normalizedSource}:${normalizedTarget}:${cleanText}`;
+  if (translationCache.has(cacheKey)) {
+    return translationCache.get(cacheKey);
+  }
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(normalizedSource)}&tl=${encodeURIComponent(normalizedTarget)}&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const translated = data[0].map(segment => segment[0]).join('');
+        if (translated && translated.trim()) {
+          if (translationCache.size > 500) translationCache.clear();
+          translationCache.set(cacheKey, translated);
+          return translated;
+        }
+      }
+    }
+  } catch (err) {
+    // Non-blocking on network failure
+  }
+  return cleanText;
+}
+
 // Helper: Detect language (English, Bisaya/Cebuano, or Tagalog/Filipino)
 function detectLanguage(text) {
   if (!text) return 'english';
   const t = text.toLowerCase();
+
+  // Script-based detection
+  if (/[\u4e00-\u9fa5]/.test(t)) return 'zh';
+  if (/[\u3040-\u30ff]/.test(t)) return 'ja';
+  if (/[\uac00-\ud7af]/.test(t)) return 'ko';
+  if (/[\u0600-\u06ff]/.test(t)) return 'ar';
+
 
   // Strong Bisaya / Cebuano indicators
   const bisayaMarkers = [
@@ -98,15 +185,15 @@ const KB = [
       'kinsay mga miyembro', 'mga unibersidad nga miyembro', 'kinsay apil sa dasig', 'listahan sa mga miyembro', 'kinsay mga sakop',
       'sino-sino ang mga miyembro', 'mga kasaping paaralan', 'sino ang kasali sa dasig', 'talaan ng mga miyembro'
     ],
-    reply_en: '🏛️ **DASIG Consortium Member Institutions:**\n• **CIT-University** (Cebu City — Host & Engineering Hub)\n• **UP Visayas** (Marine & Aquatic Sciences, Iloilo/Miagao)\n• **University of San Agustin** (Governance & Ethics, Iloilo)\n• **DOST Region VII** (Science, Technology & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Trade & MSME Commercialization)\n• **DepEd Region VII** (Basic Education & EdTech)',
-    reply_ceb: '🏛️ **Mga Miyembro sa DASIG Consortium:**\n• **CIT-University** (Cebu City — Host & Engineering Hub)\n• **UP Visayas** (Marine & Aquatic Sciences, Iloilo/Miagao)\n• **University of San Agustin** (Governance & Ethics, Iloilo)\n• **DOST Region VII** (Siyensya, Teknolohiya & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Patigayon & MSME Commercialization)\n• **DepEd Region VII** (Edukasyon & EdTech)',
-    reply_tgl: '🏛️ **Mga Miyembro ng DASIG Consortium:**\n• **CIT-University** (Cebu City — Host & Engineering Hub)\n• **UP Visayas** (Marine & Aquatic Sciences, Iloilo/Miagao)\n• **University of San Agustin** (Governance & Ethics, Iloilo)\n• **DOST Region VII** (Agham, Teknolohiya & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Kalakalan & MSME Commercialization)\n• **DepEd Region VII** (Edukasyon & EdTech)',
+    reply_en: '🏛️ **DASIG Consortium Member Institutions (Region VII):**\n• **CIT-University** (Cebu City — Host Node & Engineering Hub)\n• **UP Cebu** (Lahug, Cebu City — Computing, IT & Environmental Innovation)\n• **University of San Carlos (USC)** (Cebu City — Science, Engineering & Research Excellence)\n• **DOST Region VII** (Science, Technology & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Trade & MSME Commercialization)\n• **DepEd Region VII** (Basic Education & EdTech)',
+    reply_ceb: '🏛️ **Mga Miyembro sa DASIG Consortium (Rehiyon VII):**\n• **CIT-University** (Cebu City — Host Node & Engineering Hub)\n• **UP Cebu** (Information Technology & Environmental Science)\n• **University of San Carlos (USC)** (Science, Engineering & Research Excellence)\n• **DOST Region VII** (Siyensya, Teknolohiya & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Patigayon & MSME Commercialization)\n• **DepEd Region VII** (Edukasyon & EdTech)',
+    reply_tgl: '🏛️ **Mga Miyembro ng DASIG Consortium (Rehiyon VII):**\n• **CIT-University** (Cebu City — Host Node & Engineering Hub)\n• **UP Cebu** (Information Technology & Environmental Science)\n• **University of San Carlos (USC)** (Science, Engineering & Research Excellence)\n• **DOST Region VII** (Agham, Teknolohiya & Research Grants)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Kalakalan & MSME Commercialization)\n• **DepEd Region VII** (Edukasyon & EdTech)',
   },
   {
     intent: 'events',
     keywords: [
       'event', 'events', 'summit', 'conference', 'seminar', 'workshop', 'calendar schedule', 'upcoming events',
-      'symposium', 'webinar', 'forum', 'upcoming activities', 'consortium activities', 'whats happening',
+      'symposium', 'webinar', 'forum', 'upcoming activities', 'consortium activities', 'whats happening', 'activity', 'activities', 'academic activities', 'academic events',
       'unsay mga event', 'unsay kalihokan', 'naay event', 'mga umaabot nga event', 'kanus-a ang summit', 'unsay seminar', 'mga kalihukan',
       'anong mga event', 'anong kaganapan', 'may event ba', 'mga paparating na kaganapan', 'kailan ang summit', 'anong seminar', 'mga pagtitipon'
     ],
@@ -342,12 +429,24 @@ function generateHighIQResponse(normalizedQuery, lang, history = [], ragContext 
     }
   }
 
-  if (q.includes('up cebu') || q.includes('upv') || q.includes('up visayas') || q.includes('university of the philippines cebu')) {
-    return `🌊 **University of the Philippines Visayas (UPV):**\n\nUPV is a premier national research university in Western Visayas (Miagao & Iloilo City) specializing in **Marine Science, Fisheries, and Coastal Resource Management**.\n\n• **Consortium Role:** Leads marine and environmental research initiatives, climate adaptation frameworks, and biodiversity protection across Visayas.`;
+  if (q.includes('up cebu') || q.includes('university of the philippines cebu') || q.includes('upc') || q.includes('upv')) {
+    if (lang === 'bisaya') {
+      return `🎓 **University of the Philippines Cebu (UP Cebu):**\n\nAng **UP Cebu** maoy nanguna nga nasudnong unibersidad sa Central Visayas nga nahimutang sa Lahug, Cebu City.\n\n• **Eksperto:** Computer Science, Data Science, Environmental Informatics, ug Design Innovation.\n• **Papel sa DASIG:** Nanguna sa panukiduki sa digital technology, environmental sustainability, ug high-performance computing.\n• **Website:** [upcebu.edu.ph](https://www.upcebu.edu.ph) · **Location:** Gorordo Ave, Lahug, Cebu City.`;
+    } else if (lang === 'tagalog') {
+      return `🎓 **University of the Philippines Cebu (UP Cebu):**\n\nAng **UP Cebu** ay ang pangunahing pambansang unibersidad sa Central Visayas na matatagpuan sa Lahug, Cebu City.\n\n• **Kadalubhasaan:** Computer Science, Data Science, Environmental Informatics, at Design Innovation.\n• **Tungkulin sa DASIG:** Nangunguna sa pananaliksik sa digital technology, environmental sustainability, at computing.\n• **Website:** [upcebu.edu.ph](https://www.upcebu.edu.ph) · **Lokasyon:** Gorordo Ave, Lahug, Cebu City.`;
+    } else {
+      return `🎓 **University of the Philippines Cebu (UP Cebu):**\n\n**UP Cebu** is a constituent university of the University of the Philippines System located in Lahug, Cebu City, serving as a pillar of academic and computing excellence in Region VII.\n\n• **Core Strengths:** Computer Science, Data Science, Environmental Informatics, Fine Arts, and Management.\n• **Consortium Role:** Leads research in applied computing, environmental modeling, open data policies, and digital humanities.\n• **Website:** [upcebu.edu.ph](https://www.upcebu.edu.ph) · **Location:** Gorordo Ave, Lahug, Cebu City.`;
+    }
   }
 
-  if (q.includes('usc') || q.includes('san carlos') || q.includes('university of san carlos') || q.includes('san agustin')) {
-    return `🏛️ **University of San Agustin (USa):**\n\nEstablished in 1904 in Iloilo City, USa is a distinguished Augustinian Catholic university and key DASIG academic partner leading in **Institutional Governance, Pharmacy & Health Sciences, Law, and Research Ethics**.`;
+  if (q.includes('usc') || q.includes('san carlos') || q.includes('university of san carlos')) {
+    if (lang === 'bisaya') {
+      return `🏛️ **University of San Carlos (USC):**\n\nGitukod niadtong 1595 sa Cebu City, ang **USC** usa sa pinakadaan ug pinakadungganong unibersidad sa Pilipinas.\n\n• **Eksperto:** Natural Sciences, Engineering, Pharmacy, Business, ug Research Ethics.\n• **Papel sa DASIG:** Nangulo sa collaborative research publications, biotechnology, ug institutional governance sa Central Visayas.\n• **Website:** [usc.edu.ph](https://www.usc.edu.ph) · **Campuses:** Talamban, Downtown, Cebu City.`;
+    } else if (lang === 'tagalog') {
+      return `🏛️ **University of San Carlos (USC):**\n\nItinatag noong 1595 sa Cebu City, ang **USC** ay isa sa pinakamatatanda at prestihiyosong unibersidad sa bansa.\n\n• **Kadalubhasaan:** Natural Sciences, Engineering, Pharmacy, Business, at Research Ethics.\n• **Tungkulin sa DASIG:** Nangunguna sa collaborative research, biotechnology, at institutional governance sa Rehiyon VII.\n• **Website:** [usc.edu.ph](https://www.usc.edu.ph) · **Kampus:** Talamban, Downtown, Cebu City.`;
+    } else {
+      return `🏛️ **University of San Carlos (USC):**\n\nTracing its roots to 1595 in Cebu City, the **University of San Carlos (USC)** is one of the oldest and most distinguished Catholic research universities in the Philippines.\n\n• **Core Strengths:** Natural Sciences, Chemical & Civil Engineering, Pharmacy, Law, and Interdisciplinary Research.\n• **Consortium Role:** Anchors advanced laboratory research, scientific peer reviews, biotechnology initiatives, and governance frameworks.\n• **Website:** [usc.edu.ph](https://www.usc.edu.ph) · **Campuses:** Talamban, Downtown, Cebu City.`;
+    }
   }
 
   if (q.includes('dost') || q.includes('proposal') || q.includes('grant') || q.includes('research funding') || q.includes('pondo')) {
@@ -455,7 +554,6 @@ async function getLiveRAGContext() {
 
     return lines.join('\n');
   } catch (err) {
-    console.warn('[chatbot] getLiveRAGContext error:', err.message);
     return '';
   }
 }
@@ -507,7 +605,6 @@ ${ragContext ? ragContext : ''}`;
         if (text) return text;
       }
     } catch (err) {
-      console.warn('[chatbot] Gemini API error:', err.message);
     }
   }
 
@@ -546,7 +643,6 @@ ${ragContext ? ragContext : ''}`;
         if (text) return text;
       }
     } catch (err) {
-      console.warn('[chatbot] OpenAI API error:', err.message);
     }
   }
 
@@ -683,14 +779,27 @@ const asyncRoute = (fn) => (req, res, next) => {
 };
 
 router.post('/message', asyncRoute(async (req, res) => {
-  const { message, history = [] } = req.body || {};
+  const { message, history = [], lang: preferredLang = 'en' } = req.body || {};
   if (typeof message !== 'string' || !message.trim()) return res.status(400).json({ error: 'Message is required' });
 
   const trimmed = message.trim();
-  const normalized = trimmed.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/gu, '');
+  let normalized = trimmed.replace(/^[\p{Emoji_Presentation}\p{Extended_Pictographic}]+\s*/gu, '');
   
-  // 1. Detect User's Language
-  const lang = detectLanguage(normalized);
+  // 1. Language Detection & Cross-Lingual Translation
+  const detected = detectLanguage(normalized);
+  const effectiveLang = (preferredLang && preferredLang !== 'en') ? preferredLang : detected;
+  const lang = ['bisaya', 'tagalog'].includes(effectiveLang) ? effectiveLang : 'english';
+
+  // If query is in a non-English language (e.g. Chinese, Spanish, Japanese, Korean, Arabic),
+  // translate to English so knowledge base and database searches match with 100% precision
+  if (!['bisaya', 'tagalog', 'english'].includes(effectiveLang) || /[\u4e00-\u9fa5\u3040-\u30ff\uac00-\ud7af\u0600-\u06ff]/.test(normalized)) {
+    try {
+      const enQuery = await translateServerText(normalized, 'en', 'auto');
+      if (enQuery && enQuery.trim()) {
+        normalized = enQuery.trim();
+      }
+    } catch (_) {}
+  }
 
 
   // 2. Check if this is a Live Database Counts/Stats Query (e.g. "how many events", "how many members", "pila ka miyembro", "ilang events")
@@ -711,11 +820,11 @@ router.post('/message', asyncRoute(async (req, res) => {
       if (normalized.includes('member') || normalized.includes('user') || normalized.includes('tawo') || normalized.includes('miyembro')) {
         let reply = '';
         if (lang === 'bisaya') {
-          reply = `👥 **Mga Miyembro ug tiggamit sa DASIG:**\n\nAdunay **${totalUsers} ka rehistradong miyembro ug tiggamit** sa DASIG Regional Academic Consortium gikan sa lain-laing unibersidad (CIT-U, UPV, USA) ug ahensya sa Rehiyon VII.\n\n👉 *Mahimo kang mo-apply sa [Membership Module](/membership)!*`;
+          reply = `👥 **Mga Miyembro ug tiggamit sa DASIG:**\n\nAdunay **${totalUsers} ka rehistradong miyembro ug tiggamit** sa DASIG Regional Academic Consortium gikan sa lain-laing unibersidad (CIT-U, UP Cebu, USC) ug ahensya sa Rehiyon VII.\n\n👉 *Mahimo kang mo-apply sa [Membership Module](/membership)!*`;
         } else if (lang === 'tagalog') {
-          reply = `👥 **Mga Miyembro at gumagamit ng DASIG:**\n\nMayroong **${totalUsers} rehistradong miyembro at gumagamit** sa DASIG Regional Academic Consortium mula sa iba't ibang unibersidad (CIT-U, UPV, USA) at ahensya sa Rehiyon VII.\n\n👉 *Maaari kang mag-aplay sa [Membership Module](/membership)!*`;
+          reply = `👥 **Mga Miyembro at gumagamit ng DASIG:**\n\nMayroong **${totalUsers} rehistradong miyembro at gumagamit** sa DASIG Regional Academic Consortium mula sa iba't ibang unibersidad (CIT-U, UP Cebu, USC) at ahensya sa Rehiyon VII.\n\n👉 *Maaari kang mag-aplay sa [Membership Module](/membership)!*`;
         } else {
-          reply = `👥 **DASIG Consortium Membership Metrics:**\n\nThere are currently **${totalUsers} registered users and members** across partner universities (CIT-U, UPV, USA) and government agencies in Region VII.\n\n👉 *You can apply or view criteria in the [Membership Module](/membership)!*`;
+          reply = `👥 **DASIG Consortium Membership Metrics:**\n\nThere are currently **${totalUsers} registered users and members** across partner universities (CIT-U, UP Cebu, USC) and government agencies in Region VII.\n\n👉 *You can apply or view criteria in the [Membership Module](/membership)!*`;
         }
 
         return res.json({
@@ -774,7 +883,6 @@ router.post('/message', asyncRoute(async (req, res) => {
         });
       }
     } catch (err) {
-      console.warn('[chatbot] Stats query error:', err.message);
     }
   }
 
@@ -836,7 +944,6 @@ router.post('/message', asyncRoute(async (req, res) => {
         });
       }
     } catch (err) {
-      console.warn('[chatbot] Month query error:', err.message);
     }
   }
 
@@ -904,7 +1011,6 @@ router.post('/message', asyncRoute(async (req, res) => {
         }
       }
     } catch (err) {
-      console.warn('[chatbot] Cross-table search error:', err.message);
     }
   }
 
@@ -925,7 +1031,7 @@ router.post('/message', asyncRoute(async (req, res) => {
       : OUT_OF_SCOPE[lang] || OUT_OF_SCOPE.english;
 
     Promise.resolve(supabase.from('chatbot_logs').insert({ message: normalized, matched: inDomain, intent }))
-      .catch(err => console.warn('[chatbot] Log error:', err.message));
+      .catch(() => {});
 
     return res.json({
       reply,
@@ -946,7 +1052,7 @@ router.post('/message', asyncRoute(async (req, res) => {
       matched: true,
       intent: match.intent,
     })
-  ).catch(err => console.warn('[chatbot] Log error:', err.message));
+  ).catch(() => {});
 
   // 9. Select Knowledge Base Reply
   let reply = match.reply_en;
@@ -1011,7 +1117,6 @@ router.post('/message', asyncRoute(async (req, res) => {
       }
     }
   } catch (err) {
-    console.warn('[chatbot] DB enrichment error:', err.message);
   }
 
   // 11. Navigation Target Mapping
@@ -1023,14 +1128,21 @@ router.post('/message', asyncRoute(async (req, res) => {
     haribon: '/chatbot', contact: '/contact-admin', member_institutions: '/members'
   };
 
+    // Translate final response into user's language if not English, Bisaya, or Tagalog
+  if (effectiveLang && !['english', 'en', 'bisaya', 'ceb', 'tagalog', 'tl'].includes(effectiveLang.toLowerCase())) {
+    try {
+      reply = await translateServerText(reply, effectiveLang, 'en');
+    } catch (_) {}
+  }
+
   return res.json({
     reply,
     matched: true,
-    intent: match.intent,
+    intent: match ? match.intent : 'general',
     score: bestScore,
-    language: lang,
+    language: effectiveLang,
     followups: getSmartFollowups(match?.intent || 'events', lang),
-    navigate_to: PAGE_LINKS[match.intent] || null,
+    navigate_to: match ? (PAGE_LINKS[match.intent] || null) : null,
   });
 }));
 
@@ -1053,18 +1165,53 @@ router.post('/tts', asyncRoute(async (req, res) => {
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     try {
-      const normalizedLang = LANG_CODE_MAP[lang.toLowerCase()] || lang || 'en';
-      const ttsUrl = `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${encodeURIComponent(normalizedLang)}&client=tw-ob&q=${encodeURIComponent(clean.slice(0, 500))}`;
-      const ttsRes = await fetch(ttsUrl, {
-        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-      });
-      if (ttsRes.ok) {
-        res.setHeader('Content-Type', 'audio/mpeg');
-        const buffer = await ttsRes.arrayBuffer();
-        return res.send(Buffer.from(buffer));
+      const normalizedLang = TTS_LANG_MAP[lang.toLowerCase()] || LANG_CODE_MAP[lang.toLowerCase()] || lang || 'en';
+      const rawParts = clean.split(/([。！？!?\n]+|[.][\s]+)/).filter(Boolean);
+      const chunks = [];
+      let buf = '';
+      for (const p of rawParts) {
+        if (buf.length + p.length <= 120) {
+          buf += p;
+        } else {
+          if (buf.trim()) chunks.push(buf.trim());
+          buf = p;
+        }
+      }
+      if (buf.trim()) chunks.push(buf.trim());
+
+      const finalChunks = [];
+      for (const c of chunks) {
+        if (c.length <= 120) {
+          finalChunks.push(c);
+        } else {
+          for (let i = 0; i < c.length; i += 120) {
+            finalChunks.push(c.slice(i, i + 120));
+          }
+        }
+      }
+
+      const audioBuffers = [];
+      for (const segment of finalChunks.slice(0, 10)) {
+        const ttsUrl = `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${encodeURIComponent(normalizedLang)}&client=tw-ob&q=${encodeURIComponent(segment)}`;
+        const ttsRes = await fetch(ttsUrl, {
+          headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+        });
+        if (ttsRes.ok) {
+          const arr = await ttsRes.arrayBuffer();
+          audioBuffers.push(Buffer.from(arr));
+        }
+      }
+
+      if (audioBuffers.length > 0) {
+        const fullAudio = Buffer.concat(audioBuffers);
+        res.set({
+          'Content-Type': 'audio/mpeg',
+          'Content-Length': fullAudio.length,
+          'Cache-Control': 'public, max-age=86400',
+        });
+        return res.send(fullAudio);
       }
     } catch (e) {
-      console.warn('[tts] Cloud proxy error:', e);
     }
     return res.status(200).json({
       fallback: true,
@@ -1104,7 +1251,6 @@ router.post('/tts', asyncRoute(async (req, res) => {
 
     if (!response.ok) {
       const errText = await response.text();
-      console.warn('[elevenlabs tts] API returned error:', response.status, errText);
       return res.status(200).json({ fallback: true, text: clean });
     }
 
@@ -1126,29 +1272,6 @@ router.get('/intents', (req, res) => {
   res.json(KB.map(k => ({ intent: k.intent, sample: k.keywords[0] })));
 });
 
-// Translation in-memory cache
-const translationCache = new Map();
-
-const LANG_CODE_MAP = {
-  en: 'en',
-  bis: 'ceb',
-  ceb: 'ceb',
-  tgl: 'tl',
-  tag: 'tl',
-  tl: 'tl',
-  es: 'es',
-  ja: 'ja',
-  ko: 'ko',
-  zh: 'zh-CN',
-  'zh-cn': 'zh-CN',
-  fr: 'fr',
-  de: 'de',
-  ar: 'ar',
-  ilo: 'ilo',
-  hil: 'hil',
-  it: 'it',
-  id: 'id',
-};
 
 // POST /api/chatbot/translate — Enterprise Multilingual Translation Engine
 router.post('/translate', asyncRoute(async (req, res) => {
@@ -1157,46 +1280,12 @@ router.post('/translate', asyncRoute(async (req, res) => {
     return res.status(400).json({ error: 'Text is required for translation' });
   }
 
-  const cleanText = text.trim();
+  const translated = await translateServerText(text, targetLang, sourceLang);
   const normalizedTarget = LANG_CODE_MAP[targetLang.toLowerCase()] || targetLang || 'en';
-  const normalizedSource = sourceLang === 'auto' ? 'auto' : (LANG_CODE_MAP[sourceLang.toLowerCase()] || sourceLang || 'auto');
-
-  const cacheKey = `${normalizedSource}:${normalizedTarget}:${cleanText}`;
-  if (translationCache.has(cacheKey)) {
-    return res.json({
-      translatedText: translationCache.get(cacheKey),
-      targetLang: normalizedTarget,
-      cached: true,
-    });
-  }
-
-  try {
-    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(normalizedSource)}&tl=${encodeURIComponent(normalizedTarget)}&dt=t&q=${encodeURIComponent(cleanText)}`;
-    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
-    
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data) && Array.isArray(data[0])) {
-        const translated = data[0].map(segment => segment[0]).join('');
-        if (translated && translated.trim()) {
-          if (translationCache.size > 500) translationCache.clear();
-          translationCache.set(cacheKey, translated);
-          return res.json({
-            translatedText: translated,
-            targetLang: normalizedTarget,
-            sourceLang: data[2] || normalizedSource,
-          });
-        }
-      }
-    }
-  } catch (err) {
-    console.warn('[translate] Upstream translation error:', err.message);
-  }
-
-  res.json({
-    translatedText: cleanText,
+  return res.json({
+    translatedText: translated,
     targetLang: normalizedTarget,
-    fallback: true,
+    cached: translationCache.has(`${sourceLang}:${normalizedTarget}:${text.trim()}`),
   });
 }));
 
