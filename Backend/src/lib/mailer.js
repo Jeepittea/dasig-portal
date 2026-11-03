@@ -7,11 +7,13 @@ const QRCode = require('qrcode');
 //    Set BREVO_API_KEY and MAIL_FROM (a sender address verified in Brevo) in the server environment.
 // 2. SMTP — used otherwise. For Gmail: enable 2FA and create an App Password at myaccount.google.com/apppasswords,
 //    then set SMTP_USER=your@gmail.com and SMTP_PASS=your-app-password in .env
-const USE_BREVO = !!process.env.BREVO_API_KEY;
-const SENDER_EMAIL = process.env.MAIL_FROM || process.env.SMTP_USER || 'noreply@dasig.ph';
+const rawBrevo = (process.env.BREVO_API_KEY || '').trim();
+const BREVO_API_KEY = rawBrevo && !rawBrevo.startsWith('xkeysib-') ? ('xkeysib-' + rawBrevo) : rawBrevo;
+const USE_BREVO = !!BREVO_API_KEY;
+const SENDER_EMAIL = process.env.MAIL_FROM || process.env.SMTP_USER || 'christianaire18@gmail.com';
 
 function mailConfigured() {
-  return USE_BREVO ? !!process.env.MAIL_FROM : !!(process.env.SMTP_USER && process.env.SMTP_PASS);
+  return USE_BREVO ? !!(process.env.MAIL_FROM || SENDER_EMAIL) : !!(process.env.SMTP_USER && process.env.SMTP_PASS);
 }
 
 // Brevo does not support cid: inline images, so an inline QR code becomes a note; the PNG is still attached.
@@ -24,13 +26,14 @@ function brevoSend(opts) {
   const toList = (Array.isArray(opts.to) ? opts.to : String(opts.to).split(','))
     .map(e => String(e).trim()).filter(Boolean).map(email => ({ email }));
   const body = {
-    sender: { name: 'DASIG Portal', email: process.env.MAIL_FROM },
+    sender: { name: 'DASIG Portal', email: process.env.MAIL_FROM || SENDER_EMAIL },
     to: toList,
     subject: opts.subject,
     htmlContent: withoutInlineImages(opts.html),
   };
   if (opts.text) body.textContent = opts.text;
   if (opts.replyTo) body.replyTo = { email: String(opts.replyTo) };
+  if (opts.headers) body.headers = opts.headers;
   if (opts.attachments && opts.attachments.length) {
     body.attachment = opts.attachments.map(a => ({
       name: a.filename,
@@ -41,7 +44,7 @@ function brevoSend(opts) {
   return new Promise((resolve, reject) => {
     const req = https.request({
       hostname: 'api.brevo.com', path: '/v3/smtp/email', method: 'POST', timeout: 15000,
-      headers: { 'api-key': process.env.BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json', 'content-length': Buffer.byteLength(payload) },
+      headers: { 'api-key': BREVO_API_KEY, 'content-type': 'application/json', accept: 'application/json', 'content-length': Buffer.byteLength(payload) },
     }, (res) => {
       let data = '';
       res.on('data', (c) => { data += c; });
@@ -96,7 +99,7 @@ async function sendPasswordResetEmail(toEmail, resetToken) {
     return;
   }
 
-  const resetUrl = `${PORTAL_URL}/forgot-password?token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(toEmail)}`;
+  const resetUrl = `${PORTAL_PUBLIC_URL}/forgot-password?token=${encodeURIComponent(resetToken)}&email=${encodeURIComponent(toEmail)}`;
   const transporter = createTransporter();
 
   const info = await transporter.sendMail({

@@ -87,14 +87,14 @@ const KB = [
       'unsa ang dasig', 'unsa man ang dasig', 'mahitungod sa dasig', 'unsay dasig', 'unsa ning dasig', 'unsay buhaton sa dasig', 'misyon sa dasig', 'bisyon sa dasig',
       'ano ang dasig', 'tungkol sa dasig', 'ano po ang dasig', 'ano ang ginagawa ng dasig', 'ano ang misyon ng dasig', 'ano ang layunin ng dasig'
     ],
-    reply_en: '🏛️ **What is DASIG?**\n\n**DASIG** stands for **Digital Alliance for Sustainable Innovation and Growth** — the premier regional academic and government consortium in **Central Visayas (Region VII)**, Philippines.\n\n### 🌐 The Regional Consortium Network:\n• **CIT-University** (Cebu City — Host Node & Computing Hub)\n• **UP Visayas** (Marine, Fisheries & Aquatic Sciences)\n• **University of San Agustin** (Governance, Ethics & Health Sciences)\n• **DOST Region VII** (Research Grants & Scientific Innovation)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Regional Trade & MSME Commercialization)\n• **DepEd Region VII** (Basic Education & Educational Leadership)\n\n**Mission:** Advancing collaborative research, accredited faculty bootcamps, and regional innovation across Central Visayas.',
-    reply_ceb: '🏛️ **Unsa ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** mao ang nangunang rehiyonal nga konsorsyum sa mga unibersidad ug mga ahensya sa gobyerno sa **Central Visayas (Rehiyon VII)**.\n\nNaghiusa kini sa 7 ka institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Visayas** (Marine & Aquatic Sciences)\n• **University of San Agustin** (Governance & Ethics)\n• **DOST-7, DICT-7, DTI-7, ug DepEd-7**\n\n**Katuyoan:** Pagtinabangay sa panukiduki (research), libreng technical bootcamps, ug regional digital transformation.',
-    reply_tgl: '🏛️ **Ano ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** ay ang nangungunang rehiyonal na konsorsyum ng mga unibersidad at ahensya ng pamahalaan sa **Central Visayas (Rehiyon VII)**.\n\nPinag-uugnay nito ang 7 kasaping institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Visayas** (Marine & Aquatic Sciences)\n• **University of San Agustin** (Governance & Ethics)\n• **DOST-7, DICT-7, DTI-7, at DepEd-7**\n\n**Layunin:** Collaborative research, pagsasanay sa mga guro, at pagpapalakas ng inobasyon sa Rehiyon VII.',
+    reply_en: '🏛️ **What is DASIG?**\n\n**DASIG** stands for **Digital Alliance for Sustainable Innovation and Growth** — the premier regional academic and government consortium in **Central Visayas (Region VII)**, Philippines.\n\n### 🌐 The Regional Consortium Network:\n• **CIT-University** (Cebu City — Host Node & Computing Hub)\n• **UP Cebu** (Computing, IT & Environmental Innovation)\n• **University of San Carlos (USC)** (Science, Engineering & Research Excellence)\n• **DOST Region VII** (Research Grants & Scientific Innovation)\n• **DICT Region VII** (Digital Transformation & ICT Bootcamps)\n• **DTI Region VII** (Regional Trade & MSME Commercialization)\n• **DepEd Region VII** (Basic Education & Educational Leadership)\n\n**Mission:** Advancing collaborative research, accredited faculty bootcamps, and regional innovation across Central Visayas.',
+    reply_ceb: '🏛️ **Unsa ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** mao ang nangunang rehiyonal nga konsorsyum sa mga unibersidad ug mga ahensya sa gobyerno sa **Central Visayas (Rehiyon VII)**.\n\nNaghiusa kini sa 7 ka institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Cebu** (Information Technology & Environmental Science)\n• **University of San Carlos** (Science & Engineering)\n• **DOST-7, DICT-7, DTI-7, ug DepEd-7**\n\n**Katuyoan:** Pagtinabangay sa panukiduki (research), libreng technical bootcamps, ug regional digital transformation.',
+    reply_tgl: '🏛️ **Ano ang DASIG?**\n\nAng **DASIG (Digital Alliance for Sustainable Innovation and Growth)** ay ang nangungunang rehiyonal na konsorsyum ng mga unibersidad at ahensya ng pamahalaan sa **Central Visayas (Rehiyon VII)**.\n\nPinag-uugnay nito ang 7 kasaping institusyon:\n• **CIT-University** (Cebu City — Host Node)\n• **UP Cebu** (Information Technology & Environmental Science)\n• **University of San Carlos** (Science & Engineering)\n• **DOST-7, DICT-7, DTI-7, at DepEd-7**\n\n**Layunin:** Collaborative research, pagsasanay sa mga guro, at pagpapalakas ng inobasyon sa Rehiyon VII.',
   },
   {
     intent: 'member_institutions',
     keywords: [
-      'member institutions', 'consortium members', 'who are members', 'list of members', 'partner institutions', 'all members', 'member agencies', 'part of consortium', 'member universities',
+      '/members', 'members', 'member institutions', 'consortium members', 'who are members', 'list of members', 'partner institutions', 'all members', 'member agencies', 'part of consortium', 'member universities',
       'kinsay mga miyembro', 'mga unibersidad nga miyembro', 'kinsay apil sa dasig', 'listahan sa mga miyembro', 'kinsay mga sakop',
       'sino-sino ang mga miyembro', 'mga kasaping paaralan', 'sino ang kasali sa dasig', 'talaan ng mga miyembro'
     ],
@@ -342,11 +342,11 @@ function generateHighIQResponse(normalizedQuery, lang, history = [], ragContext 
     }
   }
 
-  if (q.includes('upv') || q.includes('up visayas') || q.includes('university of the philippines visayas')) {
+  if (q.includes('up cebu') || q.includes('upv') || q.includes('up visayas') || q.includes('university of the philippines cebu')) {
     return `🌊 **University of the Philippines Visayas (UPV):**\n\nUPV is a premier national research university in Western Visayas (Miagao & Iloilo City) specializing in **Marine Science, Fisheries, and Coastal Resource Management**.\n\n• **Consortium Role:** Leads marine and environmental research initiatives, climate adaptation frameworks, and biodiversity protection across Visayas.`;
   }
 
-  if (q.includes('usa') || q.includes('san agustin') || q.includes('university of san agustin')) {
+  if (q.includes('usc') || q.includes('san carlos') || q.includes('university of san carlos') || q.includes('san agustin')) {
     return `🏛️ **University of San Agustin (USa):**\n\nEstablished in 1904 in Iloilo City, USa is a distinguished Augustinian Catholic university and key DASIG academic partner leading in **Institutional Governance, Pharmacy & Health Sciences, Law, and Research Ethics**.`;
   }
 
@@ -395,11 +395,11 @@ function generateHighIQResponse(normalizedQuery, lang, history = [], ragContext 
   // ── CONSORTIUM STATUS & EXECUTIVE BRIEFING ──────────────────────────────────
   if (q.includes('summary') || q.includes('briefing') || q.includes('overview') || q.includes('what is happening') || q.includes('latest update') || q.includes('unsay bag-o') || q.includes('anong bago')) {
     if (lang === 'bisaya') {
-      return `📊 **Executive Briefing — DASIG Consortium Rehiyon VII:**\n\n• 🏛️ **Mga Miyembro:** CIT-University (Central Host), UP Visayas, University of San Agustin, DOST-7, DICT-7, DTI-7, ug DepEd-7.\n• 📅 **Events & Bootcamps:** Aktibong mga symposiums bahin sa AI Research, Cloud Computing, ug Marine Sciences nga makita sa [Programs](/programs?tab=events).\n• 💰 **Pondo ug Grants:** Bukas nga DOST GIA ug SETUP grants alang sa mga panukiduki sa Rehiyon VII.\n• 📋 **Polisiya:** Gisubay ang Data Privacy Act of 2012 (RA 10173) ug institutional IP protection.\n\n💡 *Unsay partikular nga bahin ang gusto nimong masubay pa og dugang?*`;
+      return `📊 **Executive Briefing — DASIG Consortium Rehiyon VII:**\n\n• 🏛️ **Mga Miyembro:** CIT-University (Central Host), UP Cebu, University of San Carlos (USC), DOST-7, DICT-7, DTI-7, ug DepEd-7.\n• 📅 **Events & Bootcamps:** Aktibong mga symposiums bahin sa AI Research, Cloud Computing, ug Marine Sciences nga makita sa [Programs](/programs?tab=events).\n• 💰 **Pondo ug Grants:** Bukas nga DOST GIA ug SETUP grants alang sa mga panukiduki sa Rehiyon VII.\n• 📋 **Polisiya:** Gisubay ang Data Privacy Act of 2012 (RA 10173) ug institutional IP protection.\n\n💡 *Unsay partikular nga bahin ang gusto nimong masubay pa og dugang?*`;
     } else if (lang === 'tagalog') {
-      return `📊 **Executive Briefing — DASIG Consortium Rehiyon VII:**\n\n• 🏛️ **Mga Kasaping Institusyon:** CIT-University (Central Host), UP Visayas, University of San Agustin, DOST-7, DICT-7, DTI-7, at DepEd-7.\n• 📅 **Events at Bootcamps:** Aktibong symposiums tungkol sa AI Research, Cloud Computing, at Marine Sciences na nasa [Programs](/programs?tab=events).\n• 💰 **Pondo at Grants:** Bukas na DOST GIA at SETUP research grants para sa Rehiyon VII.\n• 📋 **Patakaran:** Sumusunod sa Data Privacy Act of 2012 (RA 10173) at institutional IP protection.\n\n💡 *Aling bahagi ang nais mong malaman nang mas detalyado?*`;
+      return `📊 **Executive Briefing — DASIG Consortium Rehiyon VII:**\n\n• 🏛️ **Mga Kasaping Institusyon:** CIT-University (Central Host), UP Cebu, University of San Carlos (USC), DOST-7, DICT-7, DTI-7, at DepEd-7.\n• 📅 **Events at Bootcamps:** Aktibong symposiums tungkol sa AI Research, Cloud Computing, at Marine Sciences na nasa [Programs](/programs?tab=events).\n• 💰 **Pondo at Grants:** Bukas na DOST GIA at SETUP research grants para sa Rehiyon VII.\n• 📋 **Patakaran:** Sumusunod sa Data Privacy Act of 2012 (RA 10173) at institutional IP protection.\n\n💡 *Aling bahagi ang nais mong malaman nang mas detalyado?*`;
     } else {
-      return `📊 **Executive Briefing — DASIG Consortium Region VII:**\n\n• 🏛️ **Consortium Network:** CIT-University (Host Node), UP Visayas, University of San Agustin, DOST-7, DICT-7, DTI-7, and DepEd-7.\n• 📅 **Active Programs:** Regional summits and accredited faculty bootcamps covering AI Research, Cloud Infrastructure, and Marine Sciences (viewable in [Programs](/programs?tab=events)).\n• 💰 **Research Funding:** Open DOST Grants-In-Aid (GIA) and SETUP innovation grant calls for regional HEIs.\n• 📋 **Governance:** Compliant with the Data Privacy Act of 2012 (RA 10173) and inter-HEI IP sharing frameworks.\n\n💡 *Which specific area would you like to explore further?*`;
+      return `📊 **Executive Briefing — DASIG Consortium Region VII:**\n\n• 🏛️ **Consortium Network:** CIT-University (Host Node), UP Cebu, University of San Carlos (USC), DOST-7, DICT-7, DTI-7, and DepEd-7.\n• 📅 **Active Programs:** Regional summits and accredited faculty bootcamps covering AI Research, Cloud Infrastructure, and Marine Sciences (viewable in [Programs](/programs?tab=events)).\n• 💰 **Research Funding:** Open DOST Grants-In-Aid (GIA) and SETUP innovation grant calls for regional HEIs.\n• 📋 **Governance:** Compliant with the Data Privacy Act of 2012 (RA 10173) and inter-HEI IP sharing frameworks.\n\n💡 *Which specific area would you like to explore further?*`;
     }
   }
 
@@ -463,7 +463,7 @@ async function getLiveRAGContext() {
 // External Generative LLM Caller (Scoped Strictly to DASIG Portal & Region VII with High IQ + Multi-Turn Memory)
 async function callGenerativeLLM(userPrompt, lang, history = [], ragContext = '') {
   const systemInstruction = `You are Haribon AI, the specialized, high-IQ intelligent assistant exclusively for the DASIG Regional Academic Consortium (Region VII Central Visayas, Philippines).
-Your scope is strictly focused on the DASIG Portal, its member institutions (CIT-University as Central Host, UP Visayas, University of San Agustin, DOST-7, DICT-7, DTI-7, DepEd-7), consortium events, summits, faculty training bootcamps, DOST research grants, memberships, policies, and academic capstone evaluation.
+Your scope is strictly focused on the DASIG Portal, its member institutions (CIT-University as Central Host, UP Cebu, University of San Carlos (USC), DOST-7, DICT-7, DTI-7, DepEd-7), consortium events, summits, faculty training bootcamps, DOST research grants, memberships, policies, and academic capstone evaluation.
 You have a VERY HIGH IQ and understand natural phrasing, typos, and questions in English, Bisaya/Cebuano, and Tagalog/Filipino.
 You remember past conversation context and handle follow-up pronouns naturally.
 Always format output with clear Markdown headers, bold highlights, bullet points, and portal links (e.g. [Programs](/programs?tab=events), [Membership](/membership)).
@@ -632,6 +632,45 @@ const MULTI_FOLLOWUPS = {
   ]
 };
 
+const INTENT_FOLLOWUPS = {
+  events: {
+    english: ['How do I get my ticket QR pass?', 'Are certificates provided for attendees?', 'What are the summit schedules?'],
+    bisaya: ['Unsaon pagkuha sa akong ticket QR code?', 'Libre ba ang certificate sa pagtambong?', 'Kanus-a ang eskedyul sa mga summit?'],
+    tagalog: ['Paano kukunin ang QR ticket pass?', 'Libre ba ang certificate ng pagdalo?', 'Kailan ang iskedyul ng mga summit?']
+  },
+  training: {
+    english: ['What are the prerequisites for enrollment?', 'Do participants receive certificates of completion?', 'Tell me about the Full-Stack Bootcamp'],
+    bisaya: ['Unsa ang mga rekisitos para makasulod?', 'Makadawat ba og certificate of completion?', 'Sultihi ko bahin sa Full-Stack Bootcamp'],
+    tagalog: ['Ano ang kailangan para makasali sa training?', 'May Certificate of Completion ba pagkatapos?', 'Ikuwento ang Full-Stack Web Bootcamp']
+  },
+  funding: {
+    english: ['What is the DOST Grants-In-Aid funding limit?', 'How do partner HEIs submit joint grant proposals?', 'When is the next scholarship deadline?'],
+    bisaya: ['Pila ang pondo sa DOST-7 Grants-In-Aid?', 'Unsaon pagsumite og joint research proposal?', 'Kanus-a ang deadline sa mga scholarships?'],
+    tagalog: ['Magkano ang pondo sa DOST Grants-In-Aid?', 'Paano magsumite ng joint research proposal?', 'Kailan ang deadline ng scholarship application?']
+  },
+  membership: {
+    english: ['What is the difference between Tier 1 and Tier 2?', 'What are the institutional accreditation requirements?', 'How do I apply for consortium membership?'],
+    bisaya: ['Unsay kalainan sa Tier 1 ug Tier 2 membership?', 'Unsa ang mga rekisitos sa akreditasyon?', 'Unsaon pag-aplay sa konsorsyum?'],
+    tagalog: ['Ano ang kaibahan ng Tier 1 at Tier 2?', 'Ano ang mga kailangan para sa akreditasyon?', 'Paano mag-aplay sa pagka-miyembro?']
+  },
+  policies: {
+    english: ['What is the Data Privacy Policy under RA 10173?', 'How are Intellectual Property rights protected?', 'Who can access members-only policies?'],
+    bisaya: ['Unsa ang patakaran sa Data Privacy sa DASIG?', 'Unsaon pagpanalipod sa Intellectual Property?', 'Kinsa ang makabasa sa mga pribadong polisiya?'],
+    tagalog: ['Ano ang patakaran sa Data Privacy ng DASIG?', 'Paano pinoprotektahan ang Intellectual Property?', 'Sino ang may access sa members-only na dokumento?']
+  }
+};
+
+function getSmartFollowups(intent, lang) {
+  const normLang = ['bisaya', 'tagalog'].includes(lang) ? lang : 'english';
+  if (intent) {
+    const key = Object.keys(INTENT_FOLLOWUPS).find(k => intent.toLowerCase().includes(k));
+    if (key && INTENT_FOLLOWUPS[key][normLang]) {
+      return INTENT_FOLLOWUPS[key][normLang];
+    }
+  }
+  return MULTI_FOLLOWUPS[normLang] || MULTI_FOLLOWUPS.english;
+}
+
 // Express 4 does not catch errors thrown inside async handlers; an unhandled
 // rejection then terminates the Node process. Route every async handler through
 // this wrapper so a failure returns HTTP 500 and the API keeps serving others.
@@ -685,7 +724,7 @@ router.post('/message', asyncRoute(async (req, res) => {
           intent: 'members_count',
           score: 10,
           language: lang,
-          followups: MULTI_FOLLOWUPS[lang],
+          followups: getSmartFollowups(match?.intent || 'events', lang),
           navigate_to: '/membership',
           suggestions: []
         });
@@ -707,7 +746,7 @@ router.post('/message', asyncRoute(async (req, res) => {
           intent: 'events_count',
           score: 10,
           language: lang,
-          followups: MULTI_FOLLOWUPS[lang],
+          followups: getSmartFollowups(match?.intent || 'events', lang),
           navigate_to: '/programs?tab=events',
           suggestions: []
         });
@@ -729,7 +768,7 @@ router.post('/message', asyncRoute(async (req, res) => {
           intent: 'training_count',
           score: 10,
           language: lang,
-          followups: MULTI_FOLLOWUPS[lang],
+          followups: getSmartFollowups(match?.intent || 'events', lang),
           navigate_to: '/programs?tab=training',
           suggestions: []
         });
@@ -791,7 +830,7 @@ router.post('/message', asyncRoute(async (req, res) => {
           intent: 'events_month',
           score: 10,
           language: lang,
-          followups: MULTI_FOLLOWUPS[lang],
+          followups: getSmartFollowups(match?.intent || 'events', lang),
           navigate_to: '/programs?tab=events',
           suggestions: []
         });
@@ -858,7 +897,7 @@ router.post('/message', asyncRoute(async (req, res) => {
             intent: 'database_search',
             score: 8.0,
             language: lang,
-            followups: MULTI_FOLLOWUPS[lang],
+            followups: getSmartFollowups(match?.intent || 'events', lang),
             navigate_to: null,
             suggestions: []
           });
@@ -894,7 +933,7 @@ router.post('/message', asyncRoute(async (req, res) => {
       intent,
       score: 0,
       language: lang,
-      followups: MULTI_FOLLOWUPS[lang],
+      followups: getSmartFollowups(match?.intent || 'events', lang),
       navigate_to: null,
       suggestions: []
     });
@@ -990,14 +1029,14 @@ router.post('/message', asyncRoute(async (req, res) => {
     intent: match.intent,
     score: bestScore,
     language: lang,
-    followups: MULTI_FOLLOWUPS[lang],
+    followups: getSmartFollowups(match?.intent || 'events', lang),
     navigate_to: PAGE_LINKS[match.intent] || null,
   });
 }));
 
 // POST /api/chatbot/tts — Neural Voice Generation (ElevenLabs + Neural Fallback)
 router.post('/tts', asyncRoute(async (req, res) => {
-  const { text, voice = 'Adam' } = req.body;
+  const { text, voice = 'Adam', lang = 'en' } = req.body || {};
   if (!text || typeof text !== 'string') {
     return res.status(400).json({ error: 'Text is required for voice generation' });
   }
@@ -1013,6 +1052,20 @@ router.post('/tts', asyncRoute(async (req, res) => {
 
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
+    try {
+      const normalizedLang = LANG_CODE_MAP[lang.toLowerCase()] || lang || 'en';
+      const ttsUrl = `https://translate.googleapis.com/translate_tts?ie=UTF-8&tl=${encodeURIComponent(normalizedLang)}&client=tw-ob&q=${encodeURIComponent(clean.slice(0, 500))}`;
+      const ttsRes = await fetch(ttsUrl, {
+        headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+      });
+      if (ttsRes.ok) {
+        res.setHeader('Content-Type', 'audio/mpeg');
+        const buffer = await ttsRes.arrayBuffer();
+        return res.send(Buffer.from(buffer));
+      }
+    } catch (e) {
+      console.warn('[tts] Cloud proxy error:', e);
+    }
     return res.status(200).json({
       fallback: true,
       message: 'No ElevenLabs API key found; using client-side High-Fidelity Neural voice synthesizer',
@@ -1072,5 +1125,79 @@ router.post('/tts', asyncRoute(async (req, res) => {
 router.get('/intents', (req, res) => {
   res.json(KB.map(k => ({ intent: k.intent, sample: k.keywords[0] })));
 });
+
+// Translation in-memory cache
+const translationCache = new Map();
+
+const LANG_CODE_MAP = {
+  en: 'en',
+  bis: 'ceb',
+  ceb: 'ceb',
+  tgl: 'tl',
+  tag: 'tl',
+  tl: 'tl',
+  es: 'es',
+  ja: 'ja',
+  ko: 'ko',
+  zh: 'zh-CN',
+  'zh-cn': 'zh-CN',
+  fr: 'fr',
+  de: 'de',
+  ar: 'ar',
+  ilo: 'ilo',
+  hil: 'hil',
+  it: 'it',
+  id: 'id',
+};
+
+// POST /api/chatbot/translate — Enterprise Multilingual Translation Engine
+router.post('/translate', asyncRoute(async (req, res) => {
+  const { text, targetLang = 'en', sourceLang = 'auto' } = req.body;
+  if (!text || typeof text !== 'string') {
+    return res.status(400).json({ error: 'Text is required for translation' });
+  }
+
+  const cleanText = text.trim();
+  const normalizedTarget = LANG_CODE_MAP[targetLang.toLowerCase()] || targetLang || 'en';
+  const normalizedSource = sourceLang === 'auto' ? 'auto' : (LANG_CODE_MAP[sourceLang.toLowerCase()] || sourceLang || 'auto');
+
+  const cacheKey = `${normalizedSource}:${normalizedTarget}:${cleanText}`;
+  if (translationCache.has(cacheKey)) {
+    return res.json({
+      translatedText: translationCache.get(cacheKey),
+      targetLang: normalizedTarget,
+      cached: true,
+    });
+  }
+
+  try {
+    const url = `https://translate.googleapis.com/translate_a/single?client=gtx&sl=${encodeURIComponent(normalizedSource)}&tl=${encodeURIComponent(normalizedTarget)}&dt=t&q=${encodeURIComponent(cleanText)}`;
+    const response = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' } });
+    
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data) && Array.isArray(data[0])) {
+        const translated = data[0].map(segment => segment[0]).join('');
+        if (translated && translated.trim()) {
+          if (translationCache.size > 500) translationCache.clear();
+          translationCache.set(cacheKey, translated);
+          return res.json({
+            translatedText: translated,
+            targetLang: normalizedTarget,
+            sourceLang: data[2] || normalizedSource,
+          });
+        }
+      }
+    }
+  } catch (err) {
+    console.warn('[translate] Upstream translation error:', err.message);
+  }
+
+  res.json({
+    translatedText: cleanText,
+    targetLang: normalizedTarget,
+    fallback: true,
+  });
+}));
 
 module.exports = router;

@@ -1,4 +1,4 @@
-const BASE = import.meta.env.VITE_API_URL || 'http://localhost:4000/api';
+const BASE = (typeof import.meta !== 'undefined' && import.meta?.env?.VITE_API_URL) || 'http://localhost:4000/api';
 
 function getToken() {
   return localStorage.getItem('dasig_token');
@@ -14,8 +14,30 @@ function headers(extra = {}) {
 }
 
 async function request(path, options = {}) {
-  const res = await fetch(`${BASE}${path}`, { headers: headers(), ...options });
-  const data = await res.json();
+  let res;
+  try {
+    res = await fetch(`${BASE}${path}`, { headers: headers(), ...options });
+  } catch {
+    throw new Error('Network error: Unable to reach DASIG cloud API. Please check your connection or wait a moment while the cloud node initializes.');
+  }
+
+  let data = {};
+  const contentType = res.headers?.get('content-type') || '';
+  if (contentType.includes('application/json')) {
+    try {
+      data = await res.json();
+    } catch {
+      data = {};
+    }
+  } else {
+    try {
+      const text = await res.text();
+      data = { error: text?.slice(0, 200) || `HTTP ${res.status} error` };
+    } catch {
+      data = {};
+    }
+  }
+
   if (!res.ok) {
     // INC-06: the server ended this session (account suspended, password changed or reset) → sign out here too
     if (data.code === 'SESSION_INVALID' && getToken()) {
@@ -25,7 +47,7 @@ async function request(path, options = {}) {
       // /auth/me runs on every page load and is handled by AuthContext (no redirect from public pages)
       if (path !== '/auth/me' && !window.location.pathname.startsWith('/login')) window.location.assign('/login');
     }
-    throw new Error(data.error || 'Request failed');
+    throw new Error(data.error || `Request failed with status ${res.status}`);
   }
   return data;
 }
@@ -161,13 +183,15 @@ export const api = {
     },
   },
   chatbot: {
-    send: (message, history = []) => request('/chatbot/message', { method: 'POST', body: JSON.stringify({ message, history }) }),
+    send: (message, history = [], lang = 'en') => request('/chatbot/message', { method: 'POST', body: JSON.stringify({ message, history, lang }) }),
     intents: () => request('/chatbot/intents'),
-    tts: (text, voice = 'Adam') => {
+    translate: (text, targetLang = 'en', sourceLang = 'auto') =>
+      request('/chatbot/translate', { method: 'POST', body: JSON.stringify({ text, targetLang, sourceLang }) }),
+    tts: (text, lang = 'en', voice = 'Adam') => {
       return fetch(`${BASE}/chatbot/tts`, {
         method: 'POST',
         headers: headers(),
-        body: JSON.stringify({ text, voice }),
+        body: JSON.stringify({ text, lang, voice }),
       });
     },
   },

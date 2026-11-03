@@ -6,6 +6,8 @@ import HaribonFace from '../components/HaribonFace';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { solveClientQuery } from '../lib/haribonEngine';
+import { SUPPORTED_LANGUAGES, getLangByKey, translateMessageText, getLocalizedGreeting, getLocalizedUI, LANG_CHIPS } from '../lib/languages';
+import { voicePlayer } from '../lib/audioPlayer.js';
 
 // Renders bot reply text with formatted markdown, headings, bullets, numbered lists, and inline code
 function BotText({ text, isStreaming = false }) {
@@ -141,6 +143,17 @@ function BotText({ text, isStreaming = false }) {
   );
 }
 
+// Slash commands for developer/power-user UX
+const SLASH_COMMANDS = [
+  { cmd: '/events', label: 'View upcoming consortium summits & conferences', q: 'What events are coming up in Region VII?' },
+  { cmd: '/training', label: 'View accredited faculty training programs', q: 'What faculty training bootcamps are open for enrollment?' },
+  { cmd: '/grants', label: 'Query open DOST-7 research grants & calls', q: 'What funding opportunities and research grants exist?' },
+  { cmd: '/members', label: 'List partner HEIs (CIT-U, UPV, USA)', q: 'Who are the DASIG member institutions?' },
+  { cmd: '/policies', label: 'Show Data Privacy & IP sharing accords', q: 'What governance policies and charters are active?' },
+  { cmd: '/clear', label: 'Clear current conversation and reset', q: '__CLEAR__' },
+];
+
+
 // Autocomplete suggestions
 const SUGGESTIONS = [
   'What events are coming up?',
@@ -227,8 +240,8 @@ const CATEGORIZED_CHIPS = {
   ],
   MEMBERS: [
     { label: '🏛 CIT-University',          q: 'Tell me about Cebu Institute of Technology – University in DASIG' },
-    { label: '🌊 UP Visayas',              q: 'What is UP Visayas\' specialization in marine science research?' },
-    { label: '🏛 University of San Agustin', q: 'What is University of San Agustin\'s role in consortium governance?' },
+    { label: '🎓 UP Cebu',                 q: 'What programs and research specializations does UP Cebu lead?' },
+    { label: '🦅 University of San Carlos', q: 'What is University of San Carlos (USC)\'s role in the consortium?' },
     { label: '📋 Membership Tiers',        q: 'What is the difference between Tier 1 and Tier 2 membership?' },
   ],
   DIALECTS: [
@@ -239,20 +252,6 @@ const CATEGORIZED_CHIPS = {
   ],
 };
 
-// Role-based greeting
-function makeInitMsg(user) {
-  if (!user) {
-    return "Hi! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nI am fluent in **English**, **Bisaya (Cebuano)**, and **Tagalog (Filipino)**.\n\nAsk me anything about events, faculty training, membership, research grants, and governance policies. Pwede kang mangutana sa Bisaya o Tagalog!";
-  }
-  const first = (user.name || '').split(' ')[0];
-  if (user.role === 'ADMIN') {
-    return `Hello, ${first}! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nAs an administrator, I can assist you in English, Bisaya, or Tagalog with portal metrics, event capacities, training courses, and governance management.\n\nUnsay akong ikatabang kanimo karon?`;
-  }
-  if (user.role === 'MEMBER') {
-    return `Welcome back, ${first}! 🦅 I'm Haribon — your DASIG AI Assistant.\n\nYou have full member access. Ask me in English, Bisaya, or Tagalog about upcoming conferences, training enrollments, DOST grants, or governance policies.\n\nHow can I help you today?`;
-  }
-  return `Hi, ${first}! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nI can help you in English, Bisaya, or Tagalog. What would you like to know?`;
-}
 
 const CHAT_CSS = `
   @keyframes msgIn {
@@ -318,7 +317,7 @@ const CHAT_CSS = `
     display: flex;
     gap: 6px;
     margin-top: 6px;
-    opacity: 0;
+    opacity: 0.7;
     transition: opacity 0.18s;
   }
   .action-btn {
@@ -432,7 +431,10 @@ const CHAT_CSS = `
 `;
 
 function formatTime(d) {
-  return d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  if (!d) return '';
+  const dateObj = d instanceof Date ? d : new Date(d);
+  if (isNaN(dateObj.getTime())) return '';
+  return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
 
 const NAV_CARD_INFO = {
@@ -478,7 +480,7 @@ export default function ChatbotPage() {
   const [currentSessionId, setCurrentSessionId] = useState(null);
   const [showHistory, setShowHistory] = useState(true);
 
-  const initMsg = { from:'bot', text: makeInitMsg(user), time: new Date() };
+  const initMsg = { from:'bot', text: getLocalizedGreeting(user, 'en'), time: new Date() };
 
   // Resume chat from mini widget if available, otherwise fresh start
   const [messages, setMessages] = useState(() => {
@@ -518,6 +520,72 @@ export default function ChatbotPage() {
   const [listening, setListening] = useState(false);
   const [autoVoicemail, setAutoVoicemail] = useState(false);
   const [activeCat, setActiveCat] = useState('ALL');
+  const [activeLang, setActiveLang] = useState(() => {
+    try {
+      return localStorage.getItem('dasig_lang') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+  const [translations, setTranslations] = useState({});
+  const [translatingIdx, setTranslatingIdx] = useState(null);
+  const [showLangMenu, setShowLangMenu] = useState(false);
+  const ui = getLocalizedUI(activeLang, user?.name);
+
+  const handleLanguageChange = async (newLang) => {
+    setActiveLang(newLang);
+    try {
+      localStorage.setItem('dasig_lang', newLang);
+    } catch {
+      // Ignore storage errors
+    }
+    setActiveCat('ALL');
+    setShowLangMenu(false);
+
+    // 1. Immediately update initial greeting in messages[0]
+    setMessages(prev => {
+      if (!prev || prev.length === 0) return prev;
+      const updated = [...prev];
+      if (updated[0]?.from === 'bot') {
+        updated[0] = {
+          ...updated[0],
+          text: getLocalizedGreeting(user, newLang),
+        };
+      }
+      return updated;
+    });
+
+    setTranslations(prev => {
+      const next = { ...prev };
+      delete next[0];
+      return next;
+    });
+
+    // 2. Auto-translate subsequent bot messages into newLang
+    setMessages(currentMsgs => {
+      currentMsgs.forEach(async (m, idx) => {
+        if (idx > 0 && m.from === 'bot' && m.text) {
+          try {
+            setTranslatingIdx(idx);
+            const res = await translateMessageText(m.text, newLang);
+            setTranslations(prev => ({
+              ...prev,
+              [idx]: {
+                translatedText: res,
+                targetLang: newLang,
+                isShowingTranslated: true,
+              }
+            }));
+          } catch (err) {
+            console.warn('Auto translation failed for msg', idx, err);
+          } finally {
+            setTranslatingIdx(null);
+          }
+        }
+      });
+      return currentMsgs;
+    });
+  };
   const recognitionRef = useRef(null);
   const msgsContainerRef              = useRef(null);
 
@@ -529,7 +597,7 @@ export default function ChatbotPage() {
     } catch (_) {
       setSessions([]);
     }
-    setMessages([{ from:'bot', text: makeInitMsg(user), time: new Date() }]);
+    setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
     setCurrentSessionId(null);
     setTotalAsked(0); setTotalMatched(0); setMatchRate(null);
     setEnded(false); setHasReplied(false); setInput('');
@@ -581,7 +649,7 @@ export default function ChatbotPage() {
 
   function startNewChat() {
     setCurrentSessionId(null);
-    setMessages([{ from:'bot', text: makeInitMsg(user), time: new Date() }]);
+    setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
     setTotalAsked(0);
     setTotalMatched(0);
     setMatchRate(null);
@@ -657,7 +725,7 @@ export default function ChatbotPage() {
             next[lastIdx] = { ...next[lastIdx], text: fullReply, isStreaming: false };
           }
           if (autoVoicemail) {
-            setTimeout(() => speakMessage(lastIdx, fullReply), 200);
+            setTimeout(() => speakMessage(lastIdx, fullReply, activeLang), 200);
           }
           return next;
         });
@@ -678,6 +746,12 @@ export default function ChatbotPage() {
   async function send(text, isRegenerate = false) {
     const trimmed = (text || input).trim();
     if (!trimmed || thinking) return;
+
+    if (trimmed === '/clear' || trimmed === '__CLEAR__') {
+      startNewChat();
+      setInput('');
+      return;
+    }
 
     if (streamIntervalRef.current) {
       clearInterval(streamIntervalRef.current);
@@ -713,7 +787,7 @@ export default function ChatbotPage() {
       }));
 
     try {
-      const res = await api.chatbot.send(trimmed, historyPayload);
+      const res = await api.chatbot.send(trimmed, historyPayload, activeLang);
       const newTotal = totalAsked + 1;
       const newMatched = totalMatched + (res.matched ? 1 : 0);
       setTotalAsked(newTotal);
@@ -721,6 +795,15 @@ export default function ChatbotPage() {
       setMatchRate(Math.round((newMatched / newTotal) * 100));
       setHasReplied(true);
       setThinking(false);
+
+      let replyText = res.reply;
+      if (activeLang !== 'en') {
+        try {
+          replyText = await translateMessageText(res.reply, activeLang);
+        } catch (e) {
+          console.warn('[chatbot-page] Auto-translation to activeLang failed:', e);
+        }
+      }
 
       const botTemplate = {
         from: 'bot',
@@ -732,12 +815,21 @@ export default function ChatbotPage() {
         time: new Date(),
       };
 
-      streamBotResponse(botTemplate, res.reply);
+      streamBotResponse(botTemplate, replyText);
     } catch (err) {
       console.warn('[chatbot] Backend offline or waking up, using Client High-IQ Engine:', err);
       const fallback = solveClientQuery(trimmed, historyPayload, user);
       setHasReplied(true);
       setThinking(false);
+
+      let replyText = fallback.reply;
+      if (activeLang !== 'en') {
+        try {
+          replyText = await translateMessageText(fallback.reply, activeLang);
+        } catch (e) {
+          console.warn('[chatbot-page] Auto-translation to activeLang fallback failed:', e);
+        }
+      }
 
       const botTemplate = {
         from: 'bot',
@@ -749,14 +841,30 @@ export default function ChatbotPage() {
         time: new Date(),
       };
 
-      streamBotResponse(botTemplate, fallback.reply);
+      streamBotResponse(botTemplate, replyText);
     } finally {
       setTimeout(() => inputRef.current?.focus(), 50);
     }
   }
 
   function onKey(e) {
-    if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (input.startsWith('/')) {
+        const matchedCmd = SLASH_COMMANDS.find(s => s.cmd.toLowerCase() === input.trim().toLowerCase())
+          || SLASH_COMMANDS.find(s => s.cmd.toLowerCase().startsWith(input.trim().toLowerCase()));
+        if (matchedCmd) {
+          if (matchedCmd.cmd === '/clear') {
+            startNewChat();
+            setInput('');
+          } else {
+            send(matchedCmd.q);
+          }
+          return;
+        }
+      }
+      send();
+    }
   }
 
   function endChat() {
@@ -765,7 +873,7 @@ export default function ChatbotPage() {
   }
 
   function newChat() {
-    setMessages([{ from:'bot', text: makeInitMsg(user), time: new Date() }]);
+    setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
     setTotalAsked(0);
     setTotalMatched(0);
     setMatchRate(null);
@@ -821,6 +929,42 @@ export default function ChatbotPage() {
     setAtBottom(true);
   }
 
+  async function toggleTranslate(idx, originalText) {
+    const current = translations[idx];
+    if (current?.isShowingTranslated) {
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], isShowingTranslated: false },
+      }));
+      return;
+    }
+
+    if (current?.translatedText && current?.targetLang === activeLang) {
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], isShowingTranslated: true },
+      }));
+      return;
+    }
+
+    setTranslatingIdx(idx);
+    try {
+      const res = await translateMessageText(originalText, activeLang);
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: {
+          translatedText: res,
+          targetLang: activeLang,
+          isShowingTranslated: true,
+        },
+      }));
+    } catch (err) {
+      console.warn('Translation error:', err);
+    } finally {
+      setTranslatingIdx(null);
+    }
+  }
+
   function rateMessage(idx, vote) {
     setRatings(prev => ({ ...prev, [idx]: prev[idx] === vote ? null : vote }));
   }
@@ -828,110 +972,8 @@ export default function ChatbotPage() {
   const [speakingIdx, setSpeakingIdx] = useState(null);
   const [voiceSpeed, setVoiceSpeed]   = useState(1.0);
 
-  // Intelligently select the most realistic natural / neural human voice on the system
-  function getBestHumanVoice() {
-    if (!window.speechSynthesis) return null;
-    const voices = window.speechSynthesis.getVoices() || [];
-    if (!voices.length) return null;
-
-    // 1. Prioritize Microsoft Natural / Neural voices (Jenny, Guy, Aria, Ryan, Christopher)
-    const natural = voices.find(v =>
-      /natural|neural|online/i.test(v.name) && (/english|en[-_]/i.test(v.lang) || /en[-_]us|en[-_]ph|en[-_]gb/i.test(v.lang))
-    );
-    if (natural) return natural;
-
-    // 2. Google High Quality US / UK / PH English
-    const google = voices.find(v =>
-      /google/i.test(v.name) && /en[-_]/i.test(v.lang)
-    );
-    if (google) return google;
-
-    // 3. Apple Enhanced / Premium voices (Samantha, Ava, Alex, Daniel)
-    const apple = voices.find(v =>
-      /enhanced|premium|samantha|ava|daniel|karen|moira/i.test(v.name) && /en[-_]/i.test(v.lang)
-    );
-    if (apple) return apple;
-
-    // 4. Default high-compatibility English voice
-    const english = voices.find(v => /en[-_]ph|en[-_]us|en[-_]gb/i.test(v.lang)) || voices.find(v => v.lang.startsWith('en'));
-    return english || voices[0];
-  }
-
-  function cleanSpeechText(text) {
-    if (!text) return '';
-    return text
-      .replace(/https?:\/\/\S+/gi, '') // Remove URLs
-      .replace(/[\*\_\~`#]/g, '') // Remove markdown formatting
-      .replace(/[\u{1F300}-\u{1F9FF}\u{2600}-\u{26FF}\u{2700}-\u{27BF}]/gu, '') // Remove emojis to avoid robotic symbol reading
-      .replace(/^[•▸\-\*\d+\.]\s*/gm, '') // Remove bullets
-      .replace(/\s+/g, ' ')
-      .trim();
-  }
-
-  const audioPlayerRef = useRef(null);
-
-  async function speakMessage(idx, text, overrideSpeed) {
-    if (speakingIdx === idx && !overrideSpeed) {
-      if (audioPlayerRef.current) {
-        audioPlayerRef.current.pause();
-        audioPlayerRef.current = null;
-      }
-      if (window.speechSynthesis) window.speechSynthesis.cancel();
-      setSpeakingIdx(null);
-      return;
-    }
-
-    if (audioPlayerRef.current) {
-      audioPlayerRef.current.pause();
-      audioPlayerRef.current = null;
-    }
-    if (window.speechSynthesis) window.speechSynthesis.cancel();
-
-    const cleanText = cleanSpeechText(text);
-    if (!cleanText) return;
-
-    setSpeakingIdx(idx);
-    const speed = overrideSpeed || voiceSpeed || 1.0;
-
-    try {
-      // 1. Attempt ElevenLabs Neural Audio Generation via Backend API
-      const res = await api.chatbot.tts(cleanText, 'Adam');
-      const contentType = res.headers?.get('content-type') || '';
-
-      if (res.ok && contentType.includes('audio/mpeg')) {
-        const blob = await res.blob();
-        const audioUrl = URL.createObjectURL(blob);
-        const audio = new Audio(audioUrl);
-        audio.playbackRate = speed;
-        audio.onended = () => { setSpeakingIdx(null); audioPlayerRef.current = null; };
-        audio.onerror = () => { fallbackSpeak(idx, cleanText, speed); };
-        audioPlayerRef.current = audio;
-        await audio.play();
-        return;
-      }
-    } catch (e) {
-      console.warn('[tts] Backend streaming fallback:', e.message);
-    }
-
-    // 2. High-fidelity Client Neural Synthesis Fallback
-    fallbackSpeak(idx, cleanText, speed);
-  }
-
-  function fallbackSpeak(idx, cleanText, speed) {
-    if (!window.speechSynthesis) {
-      setSpeakingIdx(null);
-      return;
-    }
-    const utter = new SpeechSynthesisUtterance(cleanText);
-    const bestVoice = getBestHumanVoice();
-    if (bestVoice) utter.voice = bestVoice;
-    utter.rate = (speed || 1.0) * 0.96;
-    utter.pitch = 1.0;
-    utter.volume = 1.0;
-    utter.onend = () => setSpeakingIdx(null);
-    utter.onerror = () => setSpeakingIdx(null);
-    setSpeakingIdx(idx);
-    window.speechSynthesis.speak(utter);
+  function speakMessage(idx, text, langKey = activeLang) {
+    voicePlayer.play(idx, text, langKey, (sIdx) => setSpeakingIdx(sIdx));
   }
 
   async function copyMessage(idx, text) {
@@ -967,7 +1009,8 @@ export default function ChatbotPage() {
     }
     try {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'en-PH';
+      const langObj = getLangByKey(activeLang);
+      recognition.lang = langObj.bcp47 || 'en-US';
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
       recognition.onstart = () => setListening(true);
@@ -1325,7 +1368,24 @@ export default function ChatbotPage() {
                       }),
                     }}>
                       {msg.from === 'bot' ? (
-                        <BotText text={msg.text} isStreaming={msg.isStreaming} />
+                        <>
+                          {translations[i]?.isShowingTranslated && translations[i]?.translatedText && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              background: 'rgba(249, 115, 22, 0.15)', border: '1px solid rgba(249, 115, 22, 0.35)',
+                              borderRadius: 8, padding: '4px 10px', marginBottom: 10, fontSize: 11, color: '#f97316', fontWeight: 800,
+                            }}>
+                              <span>🌐 {ui.translatedTo} {getLangByKey(translations[i].targetLang).name}</span>
+                              <button
+                                onClick={() => toggleTranslate(i, msg.text)}
+                                style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', padding: 0, fontSize: 11, textDecoration: 'underline', fontWeight: 700 }}
+                              >
+                                Show original
+                              </button>
+                            </div>
+                          )}
+                          <BotText text={translations[i]?.isShowingTranslated && translations[i]?.translatedText ? translations[i].translatedText : msg.text} isStreaming={msg.isStreaming} />
+                        </>
                       ) : (
                         <span style={{ lineHeight: 1.6, whiteSpace: 'pre-wrap' }}>{msg.text}</span>
                       )}
@@ -1345,25 +1405,37 @@ export default function ChatbotPage() {
                           className={`action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
                           onClick={() => rateMessage(i, 'up')}
                         >
-                          👍{ratings[i] === 'up' ? ' Helpful' : ''}
+                          👍{ratings[i] === 'up' ? ` ${ui.helpful}` : ''}
                         </button>
                         <button
                           className={`action-btn${ratings[i] === 'down' ? ' rated-down' : ''}`}
                           onClick={() => rateMessage(i, 'down')}
                           title="Not helpful"
                         >
-                          👎{ratings[i] === 'down' ? ' Not helpful' : ''}
+                          👎{ratings[i] === 'down' ? ` ${ui.notHelpful}` : ''}
                         </button>
                         <button
                           className={`action-btn${copied === i ? ' copied' : ''}`}
                           onClick={() => copyMessage(i, msg.text)}
                           title="Copy response"
                         >
-                          {copied === i ? '✓ Copied' : '⧉ Copy'}
+                          {copied === i ? ui.copied : ui.copy}
+                        </button>
+                        <button
+                          className={`action-btn${translations[i]?.isShowingTranslated ? ' active-translate' : ''}`}
+                          onClick={() => toggleTranslate(i, msg.text)}
+                          title={translations[i]?.isShowingTranslated ? 'Revert to original text' : `Translate to ${getLangByKey(activeLang).name}`}
+                          style={translations[i]?.isShowingTranslated ? { color: '#f97316', borderColor: 'rgba(249,115,22,0.4)', background: 'rgba(249,115,22,0.12)' } : undefined}
+                        >
+                          {translatingIdx === i ? '⏳ Translating…' : translations[i]?.isShowingTranslated ? ui.original : ui.translate}
                         </button>
                         <button
                           className={`action-btn${speakingIdx === i ? ' speaking-btn' : ''}`}
-                          onClick={() => speakMessage(i, msg.text)}
+                          onClick={() => {
+                            const textToSpeak = (translations[i]?.isShowingTranslated && translations[i]?.translatedText) ? translations[i].translatedText : msg.text;
+                            const langToSpeak = (translations[i]?.isShowingTranslated && translations[i]?.targetLang) ? translations[i].targetLang : activeLang;
+                            speakMessage(i, textToSpeak, langToSpeak);
+                          }}
                           title={speakingIdx === i ? 'Pause voice playback' : 'Listen with high-fidelity voice'}
                         >
                           {speakingIdx === i ? (
@@ -1373,10 +1445,10 @@ export default function ChatbotPage() {
                                 <span className="voice-dot" style={{ animationDelay: '0.2s' }} />
                                 <span className="voice-dot" style={{ animationDelay: '0.4s' }} />
                               </span>
-                              <span>⏹ Stop Voice</span>
+                              <span>{ui.stopVoice}</span>
                             </>
                           ) : (
-                            <span>🔊 Read Aloud</span>
+                            <span>{ui.readAloud}</span>
                           )}
                         </button>
                         <button
@@ -1505,6 +1577,85 @@ export default function ChatbotPage() {
               {/* Quick chips & Category Navigator — show until first bot reply arrives */}
               {!ended && !hasReplied && (
                 <div style={{ padding: '0 24px 14px' }}>
+                  {/* Natural Language Switcher */}
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10, flexWrap: 'wrap', gap: 6, position: 'relative' }}>
+                    <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '.5px', display: 'flex', alignItems: 'center', gap: 5 }}>
+                      <span>🌐</span> {ui.language} / Pinulongan:
+                    </div>
+                    <div style={{ display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' }}>
+                      {SUPPORTED_LANGUAGES.slice(0, 5).map(l => (
+                        <button
+                          key={l.key}
+                          onClick={() => handleLanguageChange(l.key)}
+                          style={{
+                            background: activeLang === l.key ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${activeLang === l.key ? 'rgba(249,115,22,0.55)' : 'rgba(255,255,255,0.08)'}`,
+                            color: activeLang === l.key ? '#fb923c' : 'rgba(255,255,255,0.7)',
+                            borderRadius: 8, padding: '4px 10px', fontSize: 11.5, fontWeight: 800,
+                            cursor: 'pointer', fontFamily: 'inherit', transition: 'all .14s',
+                            display: 'flex', alignItems: 'center', gap: 4,
+                          }}
+                        >
+                          <span>{l.flag}</span>
+                          <span>{l.short}</span>
+                        </button>
+                      ))}
+
+                      {/* More Languages Dropdown Trigger */}
+                      <button
+                        onClick={() => setShowLangMenu(m => !m)}
+                        style={{
+                          background: showLangMenu || !SUPPORTED_LANGUAGES.slice(0, 5).some(l => l.key === activeLang) ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.06)',
+                          border: `1px solid ${showLangMenu || !SUPPORTED_LANGUAGES.slice(0, 5).some(l => l.key === activeLang) ? '#f97316' : 'rgba(255,255,255,0.14)'}`,
+                          color: '#fff',
+                          borderRadius: 8, padding: '4px 11px', fontSize: 11.5, fontWeight: 800,
+                          cursor: 'pointer', fontFamily: 'inherit', display: 'flex', alignItems: 'center', gap: 5,
+                        }}
+                      >
+                        <span>{getLangByKey(activeLang).flag}</span>
+                        <span>{getLangByKey(activeLang).short} ({SUPPORTED_LANGUAGES.length}+)</span>
+                        <span style={{ fontSize: 9 }}>{showLangMenu ? '▲' : '▼'}</span>
+                      </button>
+                    </div>
+
+                    {/* All Languages Popover Menu */}
+                    {showLangMenu && (
+                      <div style={{
+                        position: 'absolute', bottom: '100%', right: 0, left: 0, marginBottom: 8,
+                        background: 'rgba(11, 19, 41, 0.98)', backdropFilter: 'blur(16px)',
+                        border: '1px solid rgba(249,115,22,0.3)', borderRadius: 14,
+                        padding: 12, boxShadow: '0 16px 40px rgba(0,0,0,0.85)', zIndex: 120,
+                        maxHeight: 220, overflowY: 'auto',
+                      }}>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10, paddingBottom: 6, borderBottom: '1px solid rgba(255,255,255,0.08)' }}>
+                          <span style={{ fontSize: 11, fontWeight: 800, color: '#f97316', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                            {ui.allLanguages} ({SUPPORTED_LANGUAGES.length} Available)
+                          </span>
+                          <button onClick={() => setShowLangMenu(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 14 }}>✕</button>
+                        </div>
+                        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(160px, 1fr))', gap: 6 }}>
+                          {SUPPORTED_LANGUAGES.map(l => (
+                            <button
+                              key={l.key}
+                              onClick={() => handleLanguageChange(l.key)}
+                              style={{
+                                background: activeLang === l.key ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.04)',
+                                border: `1px solid ${activeLang === l.key ? 'rgba(249,115,22,0.5)' : 'rgba(255,255,255,0.07)'}`,
+                                color: activeLang === l.key ? '#fb923c' : 'rgba(255,255,255,0.8)',
+                                borderRadius: 8, padding: '7px 10px', fontSize: 12, fontWeight: 700,
+                                cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                                display: 'flex', alignItems: 'center', gap: 8,
+                              }}
+                            >
+                              <span style={{ fontSize: 15 }}>{l.flag}</span>
+                              <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
+                  </div>
+
                   {/* Category Pills Bar */}
                   <div style={{ display: 'flex', gap: 6, overflowX: 'auto', paddingBottom: 8, marginBottom: 8 }}>
                     {[
@@ -1532,7 +1683,10 @@ export default function ChatbotPage() {
                     ))}
                   </div>
                   <div className="chat-quick-grid" style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(220px,1fr))', gap: 9 }}>
-                    {(CATEGORIZED_CHIPS[activeCat] || CATEGORIZED_CHIPS.ALL).map(({ label, q }) => (
+                    {(activeCat === 'ALL' && activeLang !== 'en'
+                      ? (LANG_CHIPS[activeLang] || LANG_CHIPS.en)
+                      : (CATEGORIZED_CHIPS[activeCat] || CATEGORIZED_CHIPS.ALL)
+                    ).map(({ label, q }) => (
                       <button key={label} className="chip-btn" onClick={() => send(q)} disabled={thinking}>{label}</button>
                     ))}
                   </div>
@@ -1547,8 +1701,46 @@ export default function ChatbotPage() {
               }}>
                 {/* Autocomplete dropdown + textarea wrapper */}
                 <div style={{ display: 'flex', gap: 10, alignItems: 'flex-end', position: 'relative' }}>
-                  {/* Autocomplete suggestions dropdown */}
-                  {suggestions.length > 0 && (
+                  {/* Slash command popover */}
+                  {input.startsWith('/') && (
+                    <div style={{
+                      position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 8,
+                      background: 'rgba(10,16,32,0.98)', border: '1px solid rgba(249,115,22,0.4)',
+                      borderRadius: 14, overflow: 'hidden', boxShadow: '0 -16px 48px rgba(0,0,0,0.7)',
+                      zIndex: 20, padding: 6, display: 'flex', flexDirection: 'column', gap: 4,
+                    }}>
+                      <div style={{ fontSize: 11, color: '#fb923c', fontWeight: 800, padding: '4px 10px', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                        ⚡ Haribon Slash Commands
+                      </div>
+                      {SLASH_COMMANDS.filter(s => s.cmd.startsWith(input.toLowerCase())).map(sc => (
+                        <div
+                          key={sc.cmd}
+                          onClick={() => {
+                            if (sc.cmd === '/clear') {
+                              startNewChat();
+                              setInput('');
+                            } else {
+                              send(sc.q);
+                            }
+                          }}
+                          style={{
+                            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                            padding: '8px 12px', borderRadius: 8, cursor: 'pointer',
+                            background: 'rgba(255,255,255,0.03)',
+                            transition: 'all 0.15s ease',
+                          }}
+                          onMouseEnter={e => e.currentTarget.style.background = 'rgba(249,115,22,0.15)'}
+                          onMouseLeave={e => e.currentTarget.style.background = 'rgba(255,255,255,0.03)'}
+                        >
+                          <span style={{ color: '#fb923c', fontWeight: 900, fontSize: 13 }}>{sc.cmd}</span>
+                          <span style={{ color: 'rgba(255,255,255,0.7)', fontSize: 12 }}>{sc.label}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+
+                  {/* Autocomplete suggestions dropdown (when not typing slash command) */}
+                  {!input.startsWith('/') && suggestions.length > 0 && (
                     <div style={{ position: 'absolute', bottom: '100%', left: 0, right: 0, marginBottom: 6, background: 'rgba(10,16,32,0.98)', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 14, overflow: 'hidden', boxShadow: '0 -16px 48px rgba(0,0,0,0.6)', zIndex: 10 }}>
                       {suggestions.map(s => (
                         <button key={s} onClick={() => { setInput(s); setSuggestions([]); setTimeout(() => inputRef.current?.focus(), 10); }}
@@ -1567,7 +1759,7 @@ export default function ChatbotPage() {
                     value={input}
                     onChange={handleInputChange}
                     onKeyDown={onKey}
-                    placeholder={user ? `Ask Haribon, ${(user.name || 'there').split(' ')[0]}…` : 'Ask Haribon about events, membership, training, policies…'}
+                    placeholder={ui.placeholder}
                     disabled={thinking}
                     style={{ maxHeight: 120, overflowY: 'auto' }}
                   />

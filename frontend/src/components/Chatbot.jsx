@@ -4,6 +4,33 @@ import HaribonFace from './HaribonFace';
 import { api } from '../api';
 import { useAuth } from '../context/AuthContext';
 import { solveClientQuery } from '../lib/haribonEngine';
+import { SUPPORTED_LANGUAGES, getLangByKey, translateMessageText, getLocalizedGreeting, getLocalizedUI, LANG_CHIPS } from '../lib/languages';
+import { voicePlayer } from '../lib/audioPlayer.js';
+
+
+/* ── Slash commands for developer/power-user UX ─ */
+const SLASH_COMMANDS = [
+  { cmd: '/events', label: 'View upcoming consortium summits & conferences', q: 'What events are coming up in Region VII?' },
+  { cmd: '/training', label: 'View accredited faculty training programs', q: 'What faculty training bootcamps are open for enrollment?' },
+  { cmd: '/grants', label: 'Query open DOST-7 research grants & calls', q: 'What funding opportunities and research grants exist?' },
+  { cmd: '/members', label: 'List partner HEIs (CIT-U, UPV, USA)', q: 'Who are the DASIG member institutions?' },
+  { cmd: '/policies', label: 'Show Data Privacy & IP sharing accords', q: 'What governance policies and charters are active?' },
+  { cmd: '/clear', label: 'Clear current conversation and reset', q: '__CLEAR__' },
+];
+
+/* ── Rich navigation card metadata for interactive deep links ─ */
+const NAV_CARD_INFO = {
+  '/events':       { icon: '📅', title: 'Upcoming Events', desc: 'Browse summits, conferences, and technical symposiums' },
+  '/programs':     { icon: '📅', title: 'Consortium Calendar', desc: 'Explore the full schedule and monthly calendar view' },
+  '/training':     { icon: '🎓', title: 'Training & Development', desc: 'Enroll in professional development tracks and workshops' },
+  '/membership':   { icon: '👥', title: 'Institutional Membership', desc: 'Learn about membership tiers and apply for institutional affiliation' },
+  '/policies':     { icon: '📜', title: 'Policies & Governance', desc: 'Review official consortium charters, rules and guidelines' },
+  '/funding':      { icon: '💰', title: 'Funding Opportunities', desc: 'Explore government and research grants from DOST & DICT' },
+  '/partnerships': { icon: '🤝', title: 'Strategic Partnerships', desc: 'Discover collaborative initiatives across Region VII' },
+  '/news':         { icon: '📰', title: 'Press & Announcements', desc: 'Read the latest consortium news, press releases, and updates' },
+  '/members':      { icon: '🏛️', title: 'Member Institutions', desc: 'Explore Region VII universities, campuses and government agencies' },
+  '/admin':        { icon: '🛡️', title: 'Admin Command Center', desc: 'Open executive portal administration and control modules' },
+};
 
 /* ── Role-based quick chips (Trilingual: English, Bisaya, Tagalog) ─ */
 const QUICK_BY_ROLE = {
@@ -40,19 +67,13 @@ const QUICK_BY_ROLE = {
 };
 
 /* ── Role-based greeting ──────────────────────────────────────── */
-function getGreeting(user) {
-  if (!user) {
-    return "Hi! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nI am fluent in **English**, **Bisaya (Cebuano)**, and **Tagalog (Filipino)**.\n\nAsk me anything about events, faculty training, membership, research grants, and governance policies. Pwede kang mangutana sa Bisaya o Tagalog!";
-  }
-  const first = (user.name || '').split(' ')[0];
-  if (user.role === 'ADMIN') {
-    return `Hello, ${first}! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nAs an administrator, I can assist you in English, Bisaya, or Tagalog with portal metrics, event capacities, training courses, and governance management.\n\nUnsay akong ikatabang kanimo karon?`;
-  }
-  if (user.role === 'MEMBER') {
-    return `Welcome back, ${first}! 🦅 I'm Haribon — your DASIG AI Assistant.\n\nYou have full member access. Ask me in English, Bisaya, or Tagalog about upcoming conferences, training enrollments, DOST grants, or governance policies.\n\nHow can I help you today?`;
-  }
-  return `Hi, ${first}! I'm Haribon 🦅 — the DASIG AI Assistant.\n\nI can help you in English, Bisaya, or Tagalog. What would you like to know?`;
+function formatTime(d) {
+  if (!d) return '';
+  const dateObj = d instanceof Date ? d : new Date(d);
+  if (isNaN(dateObj.getTime())) return '';
+  return dateObj.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
+
 
 /* ── Bot-text formatter (Rich Markdown, Headings, Code, Bullets) ─ */
 function WBotText({ text, onNavigate, isStreaming = false }) {
@@ -236,7 +257,7 @@ const WIDGET_CSS = `
     display: flex;
     gap: 4px;
     margin-top: 4px;
-    opacity: 0;
+    opacity: 0.65;
     transition: opacity 0.18s;
   }
   .w-action-btn {
@@ -289,12 +310,11 @@ export default function Chatbot() {
   const location     = useLocation();
 
   const role         = user?.role || 'GUEST';
-  const quick        = QUICK_BY_ROLE[role] || QUICK_BY_ROLE.GUEST;
   const rb           = ROLE_BADGE[role] || ROLE_BADGE.GUEST;
 
   // All hooks MUST be declared before any conditional return
   const [open, setOpen]         = useState(false);
-  const [messages, setMessages] = useState(() => [{ from:'bot', text: getGreeting(user) }]);
+  const [messages, setMessages] = useState(() => [{ from:'bot', text: getLocalizedGreeting(user, 'en'), time: new Date() }]);
   const [input, setInput]       = useState('');
   const [thinking, setThinking] = useState(false);
   const [ended, setEnded]       = useState(false);
@@ -304,6 +324,72 @@ export default function Chatbot() {
   const [copied, setCopied]     = useState(null);
   const [speakingIdx, setSpeakingIdx] = useState(null);
   const [listening, setListening] = useState(false);
+  const [activeLang, setActiveLang] = useState(() => {
+    try {
+      return localStorage.getItem('dasig_lang') || 'en';
+    } catch {
+      return 'en';
+    }
+  });
+  const [translations, setTranslations] = useState({});
+  const [translatingIdx, setTranslatingIdx] = useState(null);
+  const [showLangMenu, setShowLangMenu] = useState(false);
+  const [copiedSummary, setCopiedSummary] = useState(false);
+  const ui = getLocalizedUI(activeLang, user?.name);
+
+  const handleLanguageChange = async (newLang) => {
+    setActiveLang(newLang);
+    try {
+      localStorage.setItem('dasig_lang', newLang);
+    } catch {
+      // Ignore storage errors
+    }
+    setShowLangMenu(false);
+
+    // 1. Immediately update initial greeting in messages[0]
+    setMessages(prev => {
+      if (!prev || prev.length === 0) return prev;
+      const updated = [...prev];
+      if (updated[0]?.from === 'bot') {
+        updated[0] = {
+          ...updated[0],
+          text: getLocalizedGreeting(user, newLang),
+        };
+      }
+      return updated;
+    });
+
+    setTranslations(prev => {
+      const next = { ...prev };
+      delete next[0];
+      return next;
+    });
+
+    // 2. Auto-translate subsequent bot messages into newLang
+    setMessages(currentMsgs => {
+      currentMsgs.forEach(async (m, idx) => {
+        if (idx > 0 && m.from === 'bot' && m.text) {
+          try {
+            setTranslatingIdx(idx);
+            const res = await translateMessageText(m.text, newLang);
+            setTranslations(prev => ({
+              ...prev,
+              [idx]: {
+                translatedText: res,
+                targetLang: newLang,
+                isShowingTranslated: true,
+              }
+            }));
+          } catch (err) {
+            console.warn('Auto translation failed for msg', idx, err);
+          } finally {
+            setTranslatingIdx(null);
+          }
+        }
+      });
+      return currentMsgs;
+    });
+  };
   const recognitionRef          = useRef(null);
   const msgsRef                 = useRef(null);
   const streamIntervalRef       = useRef(null);
@@ -318,7 +404,7 @@ export default function Chatbot() {
   useEffect(() => {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSpeakingIdx(null);
-    setMessages([{ from:'bot', text: getGreeting(user) }]);
+    setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
     setEnded(false); setInput(''); setHasReplied(false); setUnread(0);
   }, [user?.id]);
 
@@ -337,8 +423,44 @@ export default function Chatbot() {
   function newChat() {
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSpeakingIdx(null);
-    setMessages([{ from:'bot', text: getGreeting(user) }]);
+    setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
     setEnded(false); setInput(''); setHasReplied(false);
+  }
+
+  async function toggleTranslate(idx, originalText) {
+    const current = translations[idx];
+    if (current?.isShowingTranslated) {
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], isShowingTranslated: false },
+      }));
+      return;
+    }
+
+    if (current?.translatedText && current?.targetLang === activeLang) {
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: { ...prev[idx], isShowingTranslated: true },
+      }));
+      return;
+    }
+
+    setTranslatingIdx(idx);
+    try {
+      const res = await translateMessageText(originalText, activeLang);
+      setTranslations(prev => ({
+        ...prev,
+        [idx]: {
+          translatedText: res,
+          targetLang: activeLang,
+          isShowingTranslated: true,
+        },
+      }));
+    } catch (err) {
+      console.warn('Translation error:', err);
+    } finally {
+      setTranslatingIdx(null);
+    }
   }
 
   function rateMessage(idx, vote) {
@@ -353,26 +475,8 @@ export default function Chatbot() {
     } catch (_) {}
   }
 
-  function speakMessage(idx, text) {
-    if (!('speechSynthesis' in window)) return;
-    if (speakingIdx === idx) {
-      window.speechSynthesis.cancel();
-      setSpeakingIdx(null);
-      return;
-    }
-    window.speechSynthesis.cancel();
-    const cleanText = (text || '').replace(/[*_#`[\]()]/g, '');
-    const utter = new SpeechSynthesisUtterance(cleanText);
-    const voices = window.speechSynthesis.getVoices() || [];
-    const best = voices.find(v => /natural|neural|online/i.test(v.name) && /en/i.test(v.lang)) ||
-                 voices.find(v => /google/i.test(v.name) && /en/i.test(v.lang)) ||
-                 voices.find(v => /en[-_]us|en[-_]ph|en[-_]gb/i.test(v.lang));
-    if (best) utter.voice = best;
-    utter.rate = 1.0;
-    utter.onend = () => setSpeakingIdx(null);
-    utter.onerror = () => setSpeakingIdx(null);
-    setSpeakingIdx(idx);
-    window.speechSynthesis.speak(utter);
+  function speakMessage(idx, text, langKey = activeLang) {
+    voicePlayer.play(idx, text, langKey, (sIdx) => setSpeakingIdx(sIdx));
   }
 
   function toggleVoiceInput() {
@@ -388,7 +492,8 @@ export default function Chatbot() {
     }
     try {
       const recognition = new SpeechRecognition();
-      recognition.lang = 'en-PH';
+      const langObj = getLangByKey(activeLang);
+      recognition.lang = langObj.bcp47 || 'en-US';
       recognition.interimResults = false;
       recognition.maxAlternatives = 1;
       recognition.onstart = () => setListening(true);
@@ -449,9 +554,25 @@ export default function Chatbot() {
     }, 20);
   }
 
+  function exportSummary() {
+    const transcript = messages.map(m => `[${m.from === 'bot' ? 'Haribon AI' : 'User'}]: ${m.text}`).join('\n\n');
+    navigator.clipboard.writeText(transcript).then(() => {
+      setCopiedSummary(true);
+      setTimeout(() => setCopiedSummary(false), 2000);
+    }).catch(() => {});
+  }
+
   async function send(text) {
-    const t = (text || input).trim();
-    if (!t || thinking) return;
+    const rawText = (text || input).trim();
+    if (!rawText || thinking) return;
+
+    if (rawText === '/clear' || rawText === '__CLEAR__') {
+      newChat();
+      setInput('');
+      return;
+    }
+
+    const t = rawText;
 
     if (streamIntervalRef.current) {
       clearInterval(streamIntervalRef.current);
@@ -467,7 +588,7 @@ export default function Chatbot() {
     }
 
     setInput('');
-    setMessages(prev => [...prev, { from:'user', text:t }]);
+    setMessages(prev => [...prev, { from:'user', text:t, time: new Date() }]);
     setThinking(true);
 
     const historyPayload = messages
@@ -479,9 +600,18 @@ export default function Chatbot() {
       }));
 
     try {
-      const res = await api.chatbot.send(t, historyPayload);
+      const res = await api.chatbot.send(t, historyPayload, activeLang);
       setHasReplied(true);
       setThinking(false);
+
+      let replyText = res.reply;
+      if (activeLang !== 'en') {
+        try {
+          replyText = await translateMessageText(res.reply, activeLang);
+        } catch (e) {
+          console.warn('[chatbot] Auto-translation to activeLang failed:', e);
+        }
+      }
 
       const botTemplate = {
         from: 'bot',
@@ -489,14 +619,24 @@ export default function Chatbot() {
         navigate_to: res.navigate_to || null,
         matched: res.matched,
         suggestions: res.suggestions || [],
+        time: new Date(),
       };
 
-      streamBotResponse(botTemplate, res.reply);
+      streamBotResponse(botTemplate, replyText);
     } catch (err) {
       console.warn('[chatbot-widget] Backend unavailable, using client high-IQ engine:', err);
       const fallback = solveClientQuery(t, historyPayload, user);
       setHasReplied(true);
       setThinking(false);
+
+      let replyText = fallback.reply;
+      if (activeLang !== 'en') {
+        try {
+          replyText = await translateMessageText(fallback.reply, activeLang);
+        } catch (e) {
+          console.warn('[chatbot] Auto-translation to activeLang fallback failed:', e);
+        }
+      }
 
       const botTemplate = {
         from: 'bot',
@@ -504,9 +644,10 @@ export default function Chatbot() {
         navigate_to: fallback.navigate_to || null,
         matched: true,
         suggestions: fallback.suggestions || [],
+        time: new Date(),
       };
 
-      streamBotResponse(botTemplate, fallback.reply);
+      streamBotResponse(botTemplate, replyText);
     } finally {
       setTimeout(() => msgsRef.current && (msgsRef.current.scrollTop = msgsRef.current.scrollHeight), 50);
     }
@@ -580,6 +721,27 @@ export default function Chatbot() {
                 </div>
               )}
 
+              <button onClick={exportSummary} style={{
+                background: copiedSummary ? 'rgba(16,185,129,0.25)' : 'rgba(255,255,255,0.08)',
+                border: `1px solid ${copiedSummary ? 'rgba(16,185,129,0.45)' : 'rgba(255,255,255,0.18)'}`,
+                borderRadius:8, padding:'4px 8px', fontSize:11, fontWeight:700,
+                color: copiedSummary ? '#34d399' : '#fff', cursor:'pointer', fontFamily:'inherit',
+                transition:'all .13s',
+              }}
+              title="Copy entire chat transcript"
+              >{copiedSummary ? ui.copied : ui.copy}</button>
+
+              <button onClick={newChat} style={{
+                background:'rgba(255,255,255,0.08)', border:'1px solid rgba(255,255,255,0.18)',
+                borderRadius:8, padding:'4px 8px', fontSize:11, fontWeight:700,
+                color:'rgba(255,255,255,0.85)', cursor:'pointer', fontFamily:'inherit',
+                transition:'all .13s',
+              }}
+              onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.18)'}
+              onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.08)'}
+              title="Start a fresh chat"
+              >{ui.reset}</button>
+
               <button onClick={() => {
                 sessionStorage.setItem('haribon_resume', JSON.stringify(messages));
                 setOpen(false);
@@ -593,7 +755,7 @@ export default function Chatbot() {
               onMouseEnter={e => e.currentTarget.style.background='rgba(255,255,255,0.22)'}
               onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.12)'}
               title="Expand to Full Chatbot Page"
-              >Full ↗</button>
+              >{ui.full}</button>
 
               {ended ? (
                 <button onClick={newChat} style={{ background:'rgba(249,115,22,0.2)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:8, padding:'4px 9px', fontSize:10.5, fontWeight:700, color:'#f97316', cursor:'pointer', fontFamily:'inherit' }}>New</button>
@@ -641,15 +803,47 @@ export default function Chatbot() {
                     {/* Bubble */}
                     <div style={{
                       maxWidth:'88%',
-                      padding: msg.from === 'bot' ? '10px 13px' : '8px 12px',
-                      borderRadius:14, fontSize:12,
+                      padding: msg.from === 'bot' ? '11px 14px' : '9px 13px',
+                      borderRadius:15, fontSize:12.5,
+                      lineHeight:1.6,
                       ...(msg.from === 'bot'
-                        ? { background:'rgba(20,30,52,0.96)', borderBottomLeftRadius:4, border:'1px solid rgba(255,255,255,0.08)', boxShadow:'0 3px 12px rgba(0,0,0,0.25)' }
-                        : { background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', borderBottomRightRadius:4, boxShadow:'0 3px 12px rgba(249,115,22,0.35)' }
+                        ? { background:'rgba(16,24,44,0.95)', borderBottomLeftRadius:4, border:'1px solid rgba(255,255,255,0.09)', boxShadow:'0 4px 16px rgba(0,0,0,0.3)' }
+                        : { background:'linear-gradient(135deg,#f97316,#ea580c)', color:'#fff', borderBottomRightRadius:4, boxShadow:'0 4px 16px rgba(249,115,22,0.32)' }
                       ),
                     }}>
-                      {msg.from === 'bot' ? <WBotText text={msg.text} onNavigate={() => setOpen(false)} isStreaming={msg.isStreaming} /> : <span style={{ lineHeight:1.55 }}>{msg.text}</span>}
+                      {msg.from === 'bot' ? (
+                        <>
+                          {translations[i]?.isShowingTranslated && translations[i]?.translatedText && (
+                            <div style={{
+                              display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+                              background: 'rgba(249, 115, 22, 0.15)', border: '1px solid rgba(249, 115, 22, 0.35)',
+                              borderRadius: 7, padding: '3px 8px', marginBottom: 8, fontSize: 10, color: '#f97316', fontWeight: 800,
+                            }}>
+                              <span>🌐 {ui.translatedTo} {getLangByKey(translations[i].targetLang).name}</span>
+                              <button
+                                onClick={() => toggleTranslate(i, msg.text)}
+                                style={{ background: 'none', border: 'none', color: '#60a5fa', cursor: 'pointer', padding: 0, fontSize: 10, textDecoration: 'underline', fontWeight: 700 }}
+                              >
+                                Show original
+                              </button>
+                            </div>
+                          )}
+                          <WBotText text={translations[i]?.isShowingTranslated && translations[i]?.translatedText ? translations[i].translatedText : msg.text} onNavigate={() => setOpen(false)} isStreaming={msg.isStreaming} />
+                        </>
+                      ) : <span style={{ lineHeight:1.55 }}>{msg.text}</span>}
                     </div>
+                    {msg.time && (
+                      <div style={{
+                        fontSize: 9.5,
+                        color: 'rgba(255,255,255,0.38)',
+                        marginTop: 3,
+                        paddingLeft: msg.from === 'bot' ? 4 : 0,
+                        paddingRight: msg.from === 'user' ? 4 : 0,
+                        fontWeight: 500,
+                      }}>
+                        {formatTime(msg.time)}
+                      </div>
+                    )}
 
                     {/* Rating, Copy & Voice Read actions for bot messages */}
                     {msg.from === 'bot' && i > 0 && !msg.isStreaming && (
@@ -658,13 +852,13 @@ export default function Chatbot() {
                           className={`w-action-btn${ratings[i] === 'up' ? ' rated-up' : ''}`}
                           onClick={() => rateMessage(i, 'up')}
                         >
-                          👍{ratings[i] === 'up' ? ' Helpful' : ''}
+                          👍{ratings[i] === 'up' ? ` ${ui.helpful}` : ''}
                         </button>
                         <button
                           className={`w-action-btn${ratings[i] === 'down' ? ' rated-down' : ''}`}
                           onClick={() => rateMessage(i, 'down')}
                         >
-                          👎
+                          👎{ratings[i] === 'down' ? ` ${ui.notHelpful}` : ''}
                         </button>
                         <button
                           className={`w-action-btn${copied === i ? ' copied' : ''}`}
@@ -674,8 +868,20 @@ export default function Chatbot() {
                           {copied === i ? '✓ Copied' : '⧉'}
                         </button>
                         <button
+                          className={`w-action-btn${translations[i]?.isShowingTranslated ? ' active-translate' : ''}`}
+                          onClick={() => toggleTranslate(i, msg.text)}
+                          title={translations[i]?.isShowingTranslated ? 'Revert to original text' : `Translate to ${getLangByKey(activeLang).name}`}
+                          style={translations[i]?.isShowingTranslated ? { color: '#f97316', borderColor: 'rgba(249,115,22,0.4)', background: 'rgba(249,115,22,0.12)' } : undefined}
+                        >
+                          {translatingIdx === i ? '⏳ Translating…' : translations[i]?.isShowingTranslated ? ui.original : ui.translate}
+                        </button>
+                        <button
                           className={`w-action-btn${speakingIdx === i ? ' speaking' : ''}`}
-                          onClick={() => speakMessage(i, msg.text)}
+                          onClick={() => {
+                            const textToSpeak = (translations[i]?.isShowingTranslated && translations[i]?.translatedText) ? translations[i].translatedText : msg.text;
+                            const langToSpeak = (translations[i]?.isShowingTranslated && translations[i]?.targetLang) ? translations[i].targetLang : activeLang;
+                            speakMessage(i, textToSpeak, langToSpeak);
+                          }}
                           title={speakingIdx === i ? 'Stop voice playback' : 'Read aloud with voice'}
                         >
                           {speakingIdx === i ? (
@@ -711,11 +917,45 @@ export default function Chatbot() {
                     {/* Navigate CTA + follow-up chips — last bot message only */}
                     {msg.from === 'bot' && i === messages.length - 1 && !thinking && !msg.isStreaming && (
                       <div style={{ marginTop:7, maxWidth:'92%', display:'flex', flexDirection:'column', gap:7 }}>
-                        {msg.navigate_to && (
-                          <button className="w-nav-btn" onClick={() => { navigate(msg.navigate_to); setOpen(false); }}>
-                            ↗ Open page
-                          </button>
-                        )}
+                        {msg.navigate_to && (() => {
+                          const card = NAV_CARD_INFO[msg.navigate_to] || { icon: '🚀', title: 'Open Portal Page', desc: 'Click to view related module details' };
+                          return (
+                            <div
+                              onClick={() => { navigate(msg.navigate_to); setOpen(false); }}
+                              style={{
+                                background: 'rgba(15,23,42,0.92)',
+                                border: '1px solid rgba(249,115,22,0.35)',
+                                borderRadius: 10, padding: '8px 12px',
+                                cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10,
+                                transition: 'all 0.16s ease',
+                                boxShadow: '0 4px 14px rgba(0,0,0,0.35)',
+                              }}
+                              onMouseEnter={e => {
+                                e.currentTarget.style.borderColor = 'rgba(249,115,22,0.7)';
+                                e.currentTarget.style.transform = 'translateY(-1px)';
+                              }}
+                              onMouseLeave={e => {
+                                e.currentTarget.style.borderColor = 'rgba(249,115,22,0.35)';
+                                e.currentTarget.style.transform = 'none';
+                              }}
+                            >
+                              <div style={{
+                                width: 28, height: 28, borderRadius: 7,
+                                background: 'rgba(249,115,22,0.15)', border: '1px solid rgba(249,115,22,0.35)',
+                                display: 'flex', alignItems: 'center', justifyContent: 'center',
+                                fontSize: 15, flexShrink: 0,
+                              }}>{card.icon}</div>
+                              <div style={{ flex: 1, minWidth: 0 }}>
+                                <div style={{ color: '#fff', fontWeight: 800, fontSize: 11.5 }}>{card.title}</div>
+                                <div style={{ color: 'rgba(255,255,255,0.48)', fontSize: 10, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{card.desc}</div>
+                              </div>
+                              <div style={{ color: '#f97316', fontWeight: 800, fontSize: 11, display: 'flex', alignItems: 'center', gap: 2, flexShrink: 0 }}>
+                                <span>Open</span>
+                                <span>→</span>
+                              </div>
+                            </div>
+                          );
+                        })()}
                         {msg.followups?.length > 0 && (
                           <div style={{ display:'flex', gap:5, flexWrap:'wrap' }}>
                             {msg.followups.slice(0, 3).map(f => (
@@ -743,26 +983,145 @@ export default function Chatbot() {
             )}
           </div>
 
-          {/* ── Quick chips (until first reply) ── */}
-          {!ended && !hasReplied && (
-            <div style={{ padding:'6px 12px 8px', display:'flex', gap:5, flexWrap:'wrap', borderTop:'1px solid rgba(255,255,255,0.05)', maxHeight: 110, overflowY: 'auto' }}>
-              {quick.map(({ label, q }) => (
-                <button key={label} className="w-chip" onClick={() => send(q)} disabled={thinking}>{label}</button>
-              ))}
+          {/* ── Language Switcher Bar & Quick Prompts ── */}
+          {!ended && (
+            <div style={{ borderTop:'1px solid rgba(255,255,255,0.06)', background:'rgba(0,0,0,0.2)', padding:'6px 12px' }}>
+              <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginBottom: 4, position: 'relative' }}>
+                <span style={{ fontSize:10, color:'rgba(255,255,255,0.45)', fontWeight:700, textTransform:'uppercase', letterSpacing:'.5px', display:'flex', alignItems:'center', gap:4 }}>
+                  <span>🌐</span> {ui.language}:
+                </span>
+                <div style={{ display:'flex', gap:3, alignItems:'center', flexWrap:'wrap' }}>
+                  {SUPPORTED_LANGUAGES.slice(0, 4).map(l => (
+                    <button
+                      key={l.key}
+                      onClick={() => handleLanguageChange(l.key)}
+                      style={{
+                        background: activeLang === l.key ? 'rgba(249,115,22,0.22)' : 'rgba(255,255,255,0.04)',
+                        border: `1px solid ${activeLang === l.key ? 'rgba(249,115,22,0.5)' : 'rgba(255,255,255,0.08)'}`,
+                        color: activeLang === l.key ? '#fb923c' : 'rgba(255,255,255,0.55)',
+                        borderRadius: 6, padding: '2px 6px', fontSize: 9.5, fontWeight: 800,
+                        cursor: 'pointer', fontFamily: 'inherit', display:'flex', alignItems:'center', gap:3,
+                      }}
+                      title={l.name}
+                    >
+                      <span>{l.flag}</span>
+                      <span>{l.short}</span>
+                    </button>
+                  ))}
+
+                  <button
+                    onClick={() => setShowLangMenu(m => !m)}
+                    style={{
+                      background: showLangMenu || !SUPPORTED_LANGUAGES.slice(0, 4).some(l => l.key === activeLang) ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.06)',
+                      border: `1px solid ${showLangMenu || !SUPPORTED_LANGUAGES.slice(0, 4).some(l => l.key === activeLang) ? '#f97316' : 'rgba(255,255,255,0.12)'}`,
+                      color: '#fff',
+                      borderRadius: 6, padding: '2px 7px', fontSize: 9.5, fontWeight: 800,
+                      cursor: 'pointer', fontFamily: 'inherit', display:'flex', alignItems:'center', gap:3,
+                    }}
+                    title="Select from all 14+ languages"
+                  >
+                    <span>{getLangByKey(activeLang).flag}</span>
+                    <span>{getLangByKey(activeLang).short}</span>
+                    <span style={{ fontSize: 8 }}>{showLangMenu ? '▲' : '▼'}</span>
+                  </button>
+                </div>
+
+                {/* All Languages Popover Menu */}
+                {showLangMenu && (
+                  <div style={{
+                    position: 'absolute', bottom: '100%', right: 0, left: 0, marginBottom: 8,
+                    background: 'rgba(11, 19, 41, 0.98)', backdropFilter: 'blur(16px)',
+                    border: '1px solid rgba(249,115,22,0.3)', borderRadius: 12,
+                    padding: 10, boxShadow: '0 12px 36px rgba(0,0,0,0.85)', zIndex: 120,
+                    maxHeight: 190, overflowY: 'auto',
+                  }}>
+                    <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom: 8, paddingBottom: 4, borderBottom:'1px solid rgba(255,255,255,0.08)' }}>
+                      <span style={{ fontSize: 10, fontWeight: 800, color: '#f97316', textTransform: 'uppercase', letterSpacing: '.5px' }}>
+                        {ui.allLanguages} ({SUPPORTED_LANGUAGES.length})
+                      </span>
+                      <button onClick={() => setShowLangMenu(false)} style={{ background: 'none', border: 'none', color: 'rgba(255,255,255,0.5)', cursor: 'pointer', fontSize: 12 }}>✕</button>
+                    </div>
+                    <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: 5 }}>
+                      {SUPPORTED_LANGUAGES.map(l => (
+                        <button
+                          key={l.key}
+                          onClick={() => handleLanguageChange(l.key)}
+                          style={{
+                            background: activeLang === l.key ? 'rgba(249,115,22,0.25)' : 'rgba(255,255,255,0.04)',
+                            border: `1px solid ${activeLang === l.key ? 'rgba(249,115,22,0.5)' : 'rgba(255,255,255,0.07)'}`,
+                            color: activeLang === l.key ? '#fb923c' : 'rgba(255,255,255,0.8)',
+                            borderRadius: 6, padding: '5px 8px', fontSize: 10.5, fontWeight: 700,
+                            cursor: 'pointer', fontFamily: 'inherit', textAlign: 'left',
+                            display: 'flex', alignItems: 'center', gap: 6,
+                          }}
+                        >
+                          <span style={{ fontSize: 13 }}>{l.flag}</span>
+                          <span style={{ whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{l.name}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {!hasReplied && (
+                <div style={{ display:'flex', gap:5, flexWrap:'wrap', maxHeight: 85, overflowY: 'auto', paddingTop: 2 }}>
+                  {(LANG_CHIPS[activeLang] || LANG_CHIPS.en).map(({ label, q }) => (
+                    <button key={label} className="w-chip" onClick={() => send(q)} disabled={thinking}>{label}</button>
+                  ))}
+                </div>
+              )}
             </div>
           )}
 
           {/* ── Input ── */}
           {!ended && (
             <div style={{ padding:'8px 12px 14px', borderTop:'1px solid rgba(255,255,255,0.06)', display:'flex', gap:7, flexShrink:0, alignItems: 'center' }}>
-              <input
-                className="w-input"
-                value={input}
-                onChange={e => setInput(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && !thinking && send()}
-                placeholder={user ? `Ask Haribon, ${(user.name || 'there').split(' ')[0]}…` : 'Ask Haribon…'}
-                disabled={thinking}
-              />
+              <div style={{ position:'relative', flex:1, display:'flex' }}>
+                {input.startsWith('/') && (
+                  <div style={{
+                    position:'absolute', bottom:'100%', left:0, right:0, marginBottom:8,
+                    background:'#0a1329', border:'1px solid rgba(249,115,22,0.3)',
+                    borderRadius:12, padding:'6px', display:'flex', flexDirection:'column', gap:3,
+                    boxShadow:'0 16px 40px rgba(0,0,0,0.85)', zIndex:999,
+                  }}>
+                    <div style={{ fontSize:10, color:'rgba(249,115,22,0.8)', fontWeight:800, padding:'2px 6px', textTransform:'uppercase' }}>
+                      ⚡ Haribon Slash Commands
+                    </div>
+                    {SLASH_COMMANDS.filter(s => s.cmd.startsWith(input.toLowerCase())).map(sc => (
+                      <div
+                        key={sc.cmd}
+                        onClick={() => {
+                          if (sc.cmd === '/clear') {
+                            newChat();
+                            setInput('');
+                          } else {
+                            send(sc.q);
+                          }
+                        }}
+                        style={{
+                          display:'flex', alignItems:'center', justifyContent:'space-between',
+                          padding:'6px 8px', borderRadius:8, cursor:'pointer',
+                          background:'rgba(255,255,255,0.03)',
+                        }}
+                        onMouseEnter={e => e.currentTarget.style.background='rgba(249,115,22,0.15)'}
+                        onMouseLeave={e => e.currentTarget.style.background='rgba(255,255,255,0.03)'}
+                      >
+                        <span style={{ color:'#fb923c', fontWeight:900, fontSize:12 }}>{sc.cmd}</span>
+                        <span style={{ color:'rgba(255,255,255,0.6)', fontSize:11 }}>{sc.label}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <input
+                  className="w-input"
+                  value={input}
+                  onChange={e => setInput(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && !thinking && send()}
+                  placeholder={ui.placeholder}
+                  disabled={thinking}
+                />
+              </div>
               <button
                 type="button"
                 onClick={toggleVoiceInput}
