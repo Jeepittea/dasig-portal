@@ -32,40 +32,6 @@ const NAV_CARD_INFO = {
   '/admin':        { icon: '🛡️', title: 'Admin Command Center', desc: 'Open executive portal administration and control modules' },
 };
 
-/* ── Role-based quick chips (Trilingual: English, Bisaya, Tagalog) ─ */
-const QUICK_BY_ROLE = {
-  GUEST: [
-    { label: '📅 Upcoming Events',          q: 'What events are coming up?' },
-    { label: '🇵🇭 (Bisaya) Mga Events',      q: 'Maayong adlaw! Unsay mga umaabot nga events sa DASIG?' },
-    { label: '🇵🇭 (Tagalog) Mga Kaganapan',   q: 'Magandang araw! May mga paparating bang event sa DASIG?' },
-    { label: '🎓 Training Programs',        q: 'What training programs are available?' },
-    { label: '🇵🇭 (Bisaya) Unsaon Pag-apil', q: 'Unsaon pag-apil sa DASIG membership?' },
-    { label: '💰 Funding Grants',           q: 'What funding opportunities are available?' },
-    { label: '🏛 Member Institutions',      q: 'Who are the DASIG member institutions?' },
-    { label: '🦅 About Haribon',            q: 'Who are you and what languages can you speak?' },
-  ],
-  MEMBER: [
-    { label: '📅 Upcoming Events',          q: 'What events are coming up?' },
-    { label: '🇵🇭 (Bisaya) Mga Events',      q: 'Unsay mga umaabot nga kalihokan sa DASIG?' },
-    { label: '🎓 Enroll in Training',       q: 'What training programs can I enroll in?' },
-    { label: '💰 Open Funding',             q: 'What funding opportunities are open?' },
-    { label: '🤝 Partnerships',             q: 'Tell me about DASIG partnerships' },
-    { label: '📋 View Policies',            q: 'What governance policies are available?' },
-    { label: '🇵🇭 (Tagalog) Research Grants', q: 'May available bang research grants para sa unibersidad?' },
-    { label: '🏛 Member Institutions',      q: 'Who are the DASIG member institutions?' },
-  ],
-  ADMIN: [
-    { label: '📅 All Events',               q: 'What events are coming up?' },
-    { label: '🎓 Training Programs',        q: 'What training programs are available?' },
-    { label: '👥 Member Management',        q: 'What can the admin panel manage?' },
-    { label: '🤖 Trilingual AI Engine',     q: 'What languages can Haribon understand?' },
-    { label: '💰 Funding Opportunities',    q: 'What funding opportunities exist?' },
-    { label: '📋 Governance Policies',      q: 'What governance policies are available?' },
-    { label: '🤝 Partnerships',             q: 'Tell me about DASIG partnerships' },
-    { label: '🦅 Haribon Capabilities',     q: 'How does the trilingual Haribon AI work?' },
-  ],
-};
-
 /* ── Role-based greeting ──────────────────────────────────────── */
 function formatTime(d) {
   if (!d) return '';
@@ -324,9 +290,10 @@ export default function Chatbot() {
   const [messages, setMessages] = useState(() => {
     let initialLang = 'en';
     try {
-      initialLang = localStorage.getItem('dasig_lang') || 'en';
+      const stored = localStorage.getItem('dasig_lang');
+      if (stored) initialLang = stored;
     } catch {
-      initialLang = 'en';
+      // Ignore storage errors
     }
     return [{ from:'bot', text: getLocalizedGreeting(user, initialLang), time: new Date() }];
   });
@@ -387,7 +354,8 @@ export default function Chatbot() {
               isShowingTranslated: true,
             }
           }));
-        } catch (err) {
+        } catch {
+          // Ignore translation errors
         } finally {
           setTranslatingIdx(null);
         }
@@ -400,12 +368,14 @@ export default function Chatbot() {
 
   useEffect(() => {
     return () => {
+      voicePlayer.stop();
       if (streamIntervalRef.current) clearInterval(streamIntervalRef.current);
     };
   }, []);
 
   // Reset chat when user changes (login/logout)
   useEffect(() => {
+    voicePlayer.stop();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSpeakingIdx(null);
     setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
@@ -424,7 +394,13 @@ export default function Chatbot() {
   }, [messages.length, open]);
 
   function openWidget() { setOpen(true); setUnread(0); }
+  function closeWidget() {
+    voicePlayer.stop();
+    setSpeakingIdx(null);
+    setOpen(false);
+  }
   function newChat() {
+    voicePlayer.stop();
     if ('speechSynthesis' in window) window.speechSynthesis.cancel();
     setSpeakingIdx(null);
     setMessages([{ from:'bot', text: getLocalizedGreeting(user, activeLang), time: new Date() }]);
@@ -475,7 +451,7 @@ export default function Chatbot() {
       await navigator.clipboard.writeText(text);
       setCopied(idx);
       setTimeout(() => setCopied(c => c === idx ? null : c), 2000);
-    } catch (_) {}
+    } catch { /* fallback */ }
   }
 
   function speakMessage(idx, text, langKey = activeLang) {
@@ -761,7 +737,7 @@ export default function Chatbot() {
                 <button onClick={newChat} style={{ background:'rgba(249,115,22,0.2)', border:'1px solid rgba(249,115,22,0.4)', borderRadius:8, padding:'4px 9px', fontSize:10.5, fontWeight:700, color:'#f97316', cursor:'pointer', fontFamily:'inherit' }}>New</button>
               ) : (
                 <button
-                  onClick={() => setOpen(false)}
+                  onClick={closeWidget}
                   style={{
                     background: 'rgba(255,255,255,0.08)', border: '1px solid rgba(255,255,255,0.15)',
                     borderRadius: 8, width: 26, height: 26, display: 'flex', alignItems: 'center', justifyContent: 'center',
