@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { api } from '../api';
@@ -1989,16 +1989,16 @@ export default function AdminPage() {
                   </div>
                   <div style={{ width: 1, height: 14, background: 'rgba(255,255,255,0.1)' }} />
                   <button
-                    onClick={() => setQuickJumpOpen(true)}
+                    onClick={() => setHealthModalOpen(true)}
                     className="ap-btn ap-btn-ghost"
                     style={{
-                      padding: '4px 10px', borderRadius: 8, fontSize: 11.5, fontWeight: 800,
-                      color: '#fb923c', border: '1px solid rgba(249,115,22,0.3)', background: 'rgba(249,115,22,0.08)',
-                      display: 'flex', alignItems: 'center', gap: 6
+                      padding: '4px 10px', borderRadius: 8, fontSize: 11.5, fontWeight: 700,
+                      color: 'rgba(255,255,255,0.7)', border: '1px solid rgba(255,255,255,0.12)', background: 'rgba(255,255,255,0.04)',
+                      display: 'flex', alignItems: 'center', gap: 5
                     }}
+                    title="View Node Telemetry & PostgreSQL Health"
                   >
-                    <span>🔍 Quick Jump</span>
-                    <kbd style={{ fontSize: 9.5, background: 'rgba(249,115,22,0.2)', padding: '1px 5px', borderRadius: 4, color: '#fdba74' }}>⌘K</kbd>
+                    <span>⚡ Telemetry</span>
                   </button>
                 </div>
               </div>
@@ -2717,13 +2717,31 @@ function UsersTab({ showToast }) {
 
   const load = useCallback(() => {
     setLoading(true);
-    api.admin.users({ search, role: roleF })
+    api.admin.users({ limit: 500 })
       .then(r => { setUsers(r.data || []); setPage(1); })
       .catch(() => showToast('Failed to load users', false))
       .finally(() => setLoading(false));
-  }, [search, roleF]);
+  }, []);
 
   useEffect(() => { load(); }, [load]);
+
+  const filteredUsers = useMemo(() => {
+    return users.filter(u => {
+      const matchesRole = roleF === 'All' || u.role === roleF;
+      const q = search.trim().toLowerCase();
+      const matchesSearch = !q || (
+        (u.name || '').toLowerCase().includes(q) ||
+        (u.email || '').toLowerCase().includes(q) ||
+        (u.institution || '').toLowerCase().includes(q) ||
+        (u.campus || '').toLowerCase().includes(q)
+      );
+      return matchesRole && matchesSearch;
+    });
+  }, [users, roleF, search]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [roleF, search]);
 
   async function changeRole(u, role) {
     setActing(u.id + 'r');
@@ -2804,7 +2822,8 @@ function UsersTab({ showToast }) {
 
   const STATUS_CONFIG = {
     ACTIVE:   { label:'Active Account', color:'#34d399', bg:'rgba(16,185,129,0.15)', border:'rgba(16,185,129,0.3)', icon:'🟢' },
-    INACTIVE: { label:'Suspended',      color:'#94a3b8', bg:'rgba(148,163,184,0.12)', border:'rgba(148,163,184,0.25)', icon:'⚪' },
+    GUEST:    { label:'Guest Access',   color:'#93c5fd', bg:'rgba(147,197,253,0.12)', border:'rgba(147,197,253,0.28)', icon:'🌐' },
+    INACTIVE: { label:'Suspended',      color:'#f87171', bg:'rgba(244,63,94,0.14)', border:'rgba(244,63,94,0.3)', icon:'🔴' },
   };
 
   function getUserInitials(name, email) {
@@ -3068,19 +3087,19 @@ function UsersTab({ showToast }) {
         { label: 'Total Accounts', value: users.length, icon: '👥', color: '#60a5fa' },
         { label: 'Verified Members', value: users.filter(u => u.role === 'MEMBER').length, icon: '🎓', color: '#34d399' },
         { label: 'Administrators', value: users.filter(u => u.role === 'ADMIN').length, icon: '🛡️', color: '#f87171' },
-        { label: 'Active Status', value: users.filter(u => u.status === 'ACTIVE').length, icon: '🟢', color: '#fbbf24' },
+        { label: 'Active In Good Standing', value: users.filter(u => u.status !== 'INACTIVE').length, icon: '🟢', color: '#34d399' },
       ]} />
 
       {/* ── Table ── */}
       {loading ? (
         <Loading />
       ) : (() => {
-        const totalPages = Math.max(1, Math.ceil(users.length / PAGE_SIZE));
-        const paged = users.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+        const totalPages = Math.max(1, Math.ceil(filteredUsers.length / PAGE_SIZE));
+        const paged = filteredUsers.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
         return (
           <>
             <DataTable head={['User & Credentials','Institution & Node','Consortium Role','Account Status','Joined Date','Actions']}>
-              {users.length === 0 ? (
+              {filteredUsers.length === 0 ? (
                 <EmptyTR cols={6} title="No users found" desc="No consortium user accounts match your search or role filter." />
               ) : paged.map(u => {
                 const rc = ROLE_CONFIG[u.role] || ROLE_CONFIG.GUEST;
@@ -3251,7 +3270,7 @@ function UsersTab({ showToast }) {
             {totalPages > 1 && (
               <div style={{ display:'flex', alignItems:'center', justifyContent:'space-between', marginTop:16, flexWrap:'wrap', gap:8 }}>
                 <span style={{ fontSize:12.5, color:'rgba(255,255,255,0.4)' }}>
-                  Showing {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, users.length)} of {users.length} users
+                  Showing {(page-1)*PAGE_SIZE+1}–{Math.min(page*PAGE_SIZE, filteredUsers.length)} of {filteredUsers.length} users
                 </span>
                 <div style={{ display:'flex', gap:6, flexWrap:'wrap' }}>
                   <button onClick={() => setPage(p => Math.max(1,p-1))} disabled={page===1} className="ap-btn ap-btn-ghost" style={{ opacity:page===1?0.4:1 }}>← Prev</button>

@@ -89,7 +89,7 @@ router.get('/stats', async (req, res) => {
 
 // GET /api/admin/users — list all users with pagination
 router.get('/users', async (req, res) => {
-  const { role, status, search, page = 1, limit = 20 } = req.query;
+  const { role, status, search, page = 1, limit = 500 } = req.query;
 
   let query = supabase.from('users')
     .select('id, name, email, role, status, institution, campus, phone, avatar_url, tier, member_since, renewal_due, created_at', { count: 'exact' });
@@ -298,7 +298,7 @@ router.get('/reports/chatbot', async (req, res) => {
   const data = logsResult.data || [];
   const total = data.length;
   const matched = data.filter(l => l.matched).length;
-  const accuracy = total > 0 ? Math.round((matched / total) * 100) : 0;
+  const accuracy = total > 0 ? Math.round((matched / total) * 100) : 100;
 
   const intentCounts = {};
   data.filter(l => l.matched && l.intent).forEach(l => {
